@@ -1,4 +1,54 @@
 # Progress log
+## 2026-10-26 — T1.3a Backend `GET /trips/today` for drivers — done, committed, not pushed
+- Committed on each repo's `main` (fast-forward merge; task branches deleted):
+  - viamitra-backend `250316c`
+  - viamitra-mobile `d6c343e`
+  - viamitra-web `24cb348`
+- ADR-013 applied: "today" is the Asia/Kolkata date; timestamps stay UTC.
+- Changed (viamitra-backend):
+  - `backend/alembic/versions/0009_trip_service_date.py` (new). Adds `trips.service_date date NOT NULL` and an index on `(org_id, driver_id, service_date)`.
+    - Existing rows get the IST day they started, or the migration day if they never started.
+    - The default is used only for that backfill and then dropped (human decision), so every new trip must name its day.
+    - Note: the UPDATE only reaches rows if the migrating owner bypasses RLS (a superuser does). Otherwise the migration-day fill stands.
+  - `backend/app/models/entities.py`: `Trip.service_date` (no default) and the index.
+  - `backend/app/services/trips.py` (new):
+    - `service_date_at()` gets the IST date from Postgres (`timezone('Asia/Kolkata', $1)::date`), so the API doesn't depend on host tz data.
+    - `list_driver_trips_today()` filters by the token's `org_id`, `driver_id` and today, joins route and bus on `org_id`, and puts the morning shift first.
+  - `backend/app/schemas/trips.py` (new; `app/schemas` has no `__init__.py`, so it's a namespace package): `DriverTrip` has trip id, status, start/end, route id/name/shift and bus id/reg_no. No child data.
+  - `backend/app/api/trips.py` (new): `GET /trips/today` with `require_role("driver")` + `get_tenant_session`.
+  - `backend/app/main.py`: router include only.
+  - `openapi.json`: re-exported.
+- Tests: `backend/tests/test_trips_today.py` (new, 10 tests, real test DB). They cover:
+  - own trips only: yesterday, tomorrow, another driver in the same org, and org B are all absent;
+  - exact response shape and order;
+  - spoofed `org_id`/`driver_id`/`service_date` query values and an `X-Org-Id` header change nothing;
+  - a token whose org claim is wrong gets `[]`;
+  - an RLS-only case: the service's filter points at org B while the tenant session is org A, which returns `[]` (with a control, and a check that the role has neither `rolsuper` nor `rolbypassrls`);
+  - an empty list for a driver with no trip;
+  - 403 for parent, org_admin and super_admin;
+  - 401 for missing, malformed, wrong-secret, tampered, `alg:none` and expired tokens;
+  - the route has no request params and reaches the DB only via `get_tenant_session`;
+  - the IST boundary at 18:29:59 vs 18:30 UTC;
+  - `service_date` is NOT NULL with no default.
+  - Also changed: `backend/tests/test_ingest_db.py`, whose trip insert now sets `service_date` (Files widened by human).
+- viamitra-mobile and viamitra-web: `packages/api-client/src/schema.d.ts` regenerated. A second `pnpm gen:api` run gave identical output.
+- Migrations: both dev and test DBs are at `0009_trip_service_date (head)`. The human ran the downgrade to 0008 once to replace an earlier draft of 0009 that kept the default, then `dev-setup.sh` re-applied it.
+- Reviews:
+  - `task-verifier`: READY, no FAIL.
+  - `security-reviewer`: no Critical or High.
+    - Fixed: permanent default (Medium; now backfill-only); no RLS-only proof (Medium; test added).
+    - Logged, accepted by human: a revoked or re-roled driver keeps access until the access token expires (≤15 min, within the JWT rule).
+    - Logged: T1.4e's migration number clash, resolved below.
+    - Logged as the new task T1.4m: ingest doesn't check `service_date`.
+- Verify: `./scripts/verify.sh` passes for all three repos. Backend 77 passed, 0 skipped (was 67).
+- `docs/TASKS.md`:
+  - T1.3a ticked; its Files gained `tests/test_ingest_db.py`.
+  - T1.4e renumbered to `0010_*` with `down_revision = "0009_trip_service_date"`.
+  - New T1.4m (before pilot): ingest rejects points for trips whose `service_date` isn't today in IST, and stale active trips are auto-closed. The mechanism and DB role are proposed first, since Celery isn't installed.
+- Next: T1.4l (docs routes only in dev), as the human decided. T1.3b (driver scaffold) can start in parallel.
+- Open questions:
+  - T1.4m: how the auto-close is scheduled (new dependency?) and which role performs the UPDATE.
+  - T1.4m's migration must come after T1.4e's `0010` (or both renumbered), whichever lands first.
 ## 2026-10-26 — T1.3 Route-guard test (Done-when only) — done, committed, not pushed
 - Committed as `cb4e033` on viamitra-backend `main` (fast-forward merge; the task branch is deleted).
 - Scope (human decision this session): only T1.3's Done-when, the route-guard test. The driver work in the title ("Driver login + today's trip") is NOT done. `viamitra-mobile/apps/driver` doesn't exist yet (T0.5 is blocked), and there's no trips endpoint (that needs `backend/app/api/trips*`, outside T1.3's Files). T1.3 is ticked because its Done-when is met; the driver work needs its own task (see open questions).
