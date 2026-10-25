@@ -1,0 +1,35 @@
+# Paths Claude must never modify. One glob per line, relative to the workspace root.
+# A directory pattern protects everything inside it. Lines starting with # are ignored.
+# Edit this file yourself (by hand); Claude is blocked from editing it.
+
+# Design & brand assets
+design
+viamitra-mobile/apps/*/assets
+viamitra-mobile/packages/ui/tokens
+viamitra-mobile/packages/ui/theme
+viamitra-web/apps/dashboard/public
+
+# Secrets
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+**/.env
+**/*.pem
+**/*.p8
+**/*.p12
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Guardrails (Claude must not weaken its own rules)
+.claude/settings.json
+.claude/hooks
+.claude/protected-paths.txt
+scripts/verify.sh
+viamitra-backend/scripts/check.sh
+viamitra-mobile/scripts/check.sh
+viamitra-web/scripts/check.sh
+
+# Locked decisions (Claude proposes ADRs in chat; human edits)
+docs/DECISIONS.md
