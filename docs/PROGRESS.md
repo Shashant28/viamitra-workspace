@@ -1,4 +1,60 @@
 # Progress log
+## 2026-10-27 — T1.4o mobile half: driver logout revokes the session — done, committed, not pushed. T1.4o `[x]`
+- viamitra-mobile only (backend `a499a35` and web `ede1429` were already done). Branch `task/T1.4o-auth-logout` from mobile `main` at `01953c5`. One commit, `a760626` (`feat(driver)`), fast-forwarded into `main`; branch deleted.
+- Human decision: fold T1.3d security L1 and L2 into this task. The T1.4o Files list was extended to `apps/driver/src/features/trips/**` and `apps/driver/app/index.tsx`.
+- Changed (`apps/driver` unless noted):
+  - `packages/api-client/src/schema.d.ts`: regenerated with `pnpm gen:api`. The only addition is `/auth/logout`.
+  - `src/features/auth/auth.ts`:
+    - `logout(client)` aborts a session `AbortController`, which replaces `sessionGeneration`. It detaches any refresh in flight and clears both keys without waiting for the network.
+    - It returns `{ serverDone }` for the best-effort `POST /auth/logout`, which has a 5 s abort timeout and ignores every failure.
+    - If a refresh that started before logout rotates on the server, its new token is revoked. A save that lands after logout is undone (`clearIfStillStored`), and a failed save is revoked.
+    - `refreshSession` clears its own slot only. `sessionSignal()` is exported.
+  - `src/features/auth/auth-context.tsx`:
+    - A `loginCount` ref stops a refresh or logout that settles late from signing out the next driver.
+    - `signOut` sets `signed-out` in a `finally`, so the UI signs out even if the keystore clear fails.
+  - `src/features/trips/today-trips.ts`:
+    - `loadTodayTrips` takes a signal: the GET is aborted, and a cancelled load returns null without refreshing, retrying or signing out (L1).
+    - New `startTodayTripsLoad` ties the load to the session signal. Its cleanup aborts the load and resets the state to loading (L2).
+  - `src/features/trips/use-today-trips.ts`: a thin wrapper around `startTodayTripsLoad`.
+  - `app/index.tsx`: the redirect to login depends on `status` only (L2).
+  - Tests: 47 driver tests, up from 32. They cover:
+    - logout success; a network error, 429, 500 and 503 at `/auth/logout`;
+    - a hanging `/auth/logout` and its 5 s timeout;
+    - logout with nothing stored; a fresh session signal after logout;
+    - logout during a refresh, with both sessions revoked;
+    - a hanging refresh that a later session doesn't share;
+    - a save landing mid-logout that is undone;
+    - a failed save after logout that keeps the next driver's tokens;
+    - a late 401 after cleanup or after logout; an already-aborted signal; logout during the refresh;
+    - the reset to loading.
+- Device test, Pixel_9 emulator, dev build:
+  - Setup: a second Metro on 8082 with `EXPO_PUBLIC_API_BASE_URL=http://localhost:8000`, `adb reverse tcp:8000` pointed at a dev-only logging proxy (it logged token hashes only), and the human-restarted backend (`APP_ENV=dev`, `--reload`).
+  - First run, against the old backend process (started 2026-10-26 without the route): `/auth/logout` returned 404. The app still cleared both keys and returned to Driver login. That is the failure path.
+  - Second run: logged in as +919990000001 / OTP 123456. `/auth/otp/verify` returned 200 and issued token hash `5d6fd913…`. `/trips/today` returned 200.
+  - Log out sent `POST /auth/logout` with that same token and got 204, and the app showed Driver login.
+  - Replaying the token at `/auth/refresh` returned `401 {"detail":"Invalid refresh token"}`.
+  - `adb logcat` for ReactNativeJS: 0 matches for the phone number, a JWT or `refresh_token`.
+  - Cleanup:
+    - the proxy and the extra Metro are stopped;
+    - `adb reverse --list` shows `tcp:8081 tcp:8081` and `tcp:8000 tcp:8000`;
+    - the raw-token scratch file is deleted.
+- Verify: `./scripts/verify.sh` PASS for all three repos: backend 116 passed; mobile 47 tests, 2 high audit findings already ignored; web PASS.
+- Not tested: iOS (Android emulator only). `auth-context.tsx` has no render or hook test (no render-test library is installed; adding one needs approval).
+- Reviews:
+  - task-verifier: READY, twice (before and after the review fixes).
+  - security-reviewer, first pass: three lows, all fixed:
+    - a hanging refresh stalled logout before the clear;
+    - a refresh started mid-logout could write tokens back;
+    - a late `setStatus` could sign out the next driver, and a keystore failure left the status signed-in.
+  - security-reviewer, second pass: L1–L3 confirmed fixed, nothing critical, high or medium. New LOW-1 (a failed save after logout wiped the next driver's keys and left the rotated session live) was fixed and tested.
+  - Lows logged and not fixed:
+    - (a) Keystore writes aren't serialized, so a stale `saveTokens` that stalls for a whole OTP login could interleave with the new driver's save. That could mix two drivers' access and refresh tokens, or force a re-login. Fix: one promise queue in `token-store.ts`, and compare both tokens in `clearIfStillStored`.
+    - (b) If `clearTokens` fails and the revoke also failed, the leftover keys can restore the old session at the next start. Fix: retry the delete, or overwrite both keys with empty values. The comment now states the real guarantee.
+    - (c) If `loadTokens` fails, or only one key is present at logout, no revoke is sent; the server session lives until it expires.
+    - (d) The access JWT stays valid for up to 15 minutes after logout (stateless by design).
+  - Backend note: logout and refresh rate limits are keyed per IP. That is now T1.4q (added at the human's request).
+- Next: T1.4p, once the human has added ADR-017 to DECISIONS.md, or T1.4q. Proposal: a small mobile task for lows (a)–(c).
+- Open questions: should lows (a)–(c) get their own task?
 ## 2026-10-27 — T1.3d Driver "today's trip" screen — done, committed, not pushed
 - viamitra-mobile only. This session resumed work left uncommitted on `task/T1.3d-driver-today-trip` by a cleared session (branched from `main` at `a3d6177`). The code was already written; this session did the device test, verify and commit. One commit, `01953c5` (`feat(driver)`), fast-forwarded into `main`; branch deleted.
 - Changed (`apps/driver`):
