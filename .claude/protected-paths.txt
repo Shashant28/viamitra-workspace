@@ -30,6 +30,8 @@ scripts/verify.sh
 viamitra-backend/scripts/check.sh
 viamitra-mobile/scripts/check.sh
 viamitra-web/scripts/check.sh
+# Holds auditConfig.ignoreGhsas, the only audit exceptions (ADR-016)
+viamitra-mobile/pnpm-workspace.yaml
 
 # Locked decisions (Claude proposes ADRs in chat; human edits)
 docs/DECISIONS.md
