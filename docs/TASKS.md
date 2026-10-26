@@ -74,6 +74,31 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Depends: T1.3c
   Rule: the "installed" marker must live in storage that an uninstall wipes, and it holds no token or PII. Propose the mechanism and any dependency (exact version) and get approval before installing.
   Done-when: on first launch after install, with no marker present, the driver app deletes both secure-store token keys before restoring a session, then writes the marker; later launches keep the session. `cd viamitra-mobile && pnpm --filter driver test` covers first launch (tokens cleared) and a later launch (tokens kept). `grep -rn "AsyncStorage" apps/driver/src apps/driver/app` finds nothing unless an approved marker store needs it, and then never for tokens. `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.3g Driver secure-storage robustness** (from the T1.4o mobile security review, lows (a)–(c) in its PROGRESS entry; priority: low, before pilot; approved by human 2026-10-27)
+  Files: `viamitra-mobile/apps/driver/src/features/auth/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.4o
+  Rule: no new dependency. (a) Every keystore write, clear and read-then-clear in `token-store.ts`/`auth.ts` (`saveTokens`, `clearTokens`, `clearIfStillStored`, logout's read+clear) runs through one module-level promise queue, so two saves never interleave; `clearIfStillStored` compares both tokens. (b) When `clearTokens` fails at logout, retry the delete once, then overwrite both keys with an empty value (which `loadTokens` treats as absent) so the next start can't restore the session; keep the existing "attempt both deletes" behaviour. (c) Logout reads `REFRESH_TOKEN_KEY` directly for the server revoke, so a failed `loadTokens` or a lone refresh key still gets `POST /auth/logout`. No token, phone or child PII in any error or log.
+  Done-when: `cd viamitra-mobile && pnpm --filter driver test` proves:
+  - two overlapping `saveTokens` calls end with one driver's matching pair, never a mix;
+  - a stale refresh save that lands after a new login's save doesn't clear or replace the new tokens;
+  - a failing delete at logout leaves `loadTokens()` returning null;
+  - logout with only the refresh key stored, or with `loadTokens` throwing, still sends `POST /auth/logout` with that token.
+
+  `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.3h Render tests for driver auth and screens** (from T1.3d/T1.4o verifier notes; approved by human 2026-10-27)
+  Files: `viamitra-mobile/apps/driver/package.json` (devDependencies only), `viamitra-mobile/pnpm-lock.yaml`, `viamitra-mobile/apps/driver/jest.setup.*` (only if the library needs one), `viamitra-mobile/apps/driver/src/features/auth/__tests__/**`, `viamitra-mobile/apps/driver/src/features/trips/__tests__/**`, `viamitra-mobile/apps/driver/app/__tests__/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.4o
+  Rule: propose the exact dev-dependency versions, re-checked with `npm view` on the day, and get approval before installing; pin exactly. Candidates seen on npm 2026-10-27:
+  - `@testing-library/react-native@14.1.0` (latest). Its peers are `react >=19.0.0`, `react-native >=0.78`, `jest >=29.0.0` and `test-renderer ^1.0.0`; the repo has RN 0.88.0, React 19.3.0 and Jest 30.5.2.
+  - `test-renderer@1.3.1` (latest). Its peer is `react ^19.0.0`.
+
+  Confirm they work with `jest-expo@58.0.12` before choosing. No `react-test-renderer` (deprecated in React 19). Tests mock `expo-secure-store` and `fetch` like the existing ones, and mock `expo-router` navigation; no production code changes unless a test exposes a bug (then stop and ask).
+  Done-when: `cd viamitra-mobile && pnpm --filter driver test` includes render tests for:
+  - `auth-context.tsx`: restore with no tokens → signed-out; restore with a valid refresh → signed-in; `signOut` → signed-out even when the keystore clear throws; a late `refresh()`/`signOut()` that settles after `markSignedIn` doesn't sign the new driver out.
+  - the login screen (`app/login.tsx`): invalid number error, OTP step, wrong-code error, and success navigating to today's trips.
+  - the today's-trip screen (`app/index.tsx`): loading, trips list, empty, error with Retry, and the redirect to login after logout with no previous trips shown.
+
+  `pnpm audit` adds no new high/critical finding, and `./scripts/verify.sh` passes with 0 skipped.
 - [x] **T1.4 Location ingest (MQTT → Redis → Timescale)** — Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/pyproject.toml`, `viamitra-backend/backend/uv.lock`, `viamitra-backend/.env.example`, `viamitra-backend/infra/emqx/acl*`, tests · Depends: T0.4
 - [x] **T1.4a Ingest worker reconnects to EMQX or exits non-zero on disconnect**
   Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/tests/test_ingest*`, `docs/TASKS.md`, `docs/PROGRESS.md`
