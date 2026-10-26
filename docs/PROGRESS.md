@@ -19,7 +19,14 @@
   - (3) Logging in again (phone → OTP) went straight back to today's trips.
   - `adb logcat` for ReactNativeJS: no phone number, token or trip data.
 - Verify: `./scripts/verify.sh` PASS for all three repos: backend 116 passed with 0 skipped; mobile 32 tests, 2 high audit findings already ignored; web all PASS.
-- Not done in this session: task-verifier and security-reviewer. The previous session may have run them, but it left no record.
+- Not tested: iOS (Android emulator only).
+- Reviews (run afterwards on `01953c5`, at the human's request): task-verifier READY; security-reviewer found nothing critical, high or medium. No fix commit was needed. Low findings, logged and not fixed:
+  - Security L1, `use-today-trips.ts` and `today-trips.ts`. The effect's `cancelled` flag stops only `setState`, so a load cancelled by logout can still call `refresh()` or `signOut()` when its request returns late. If driver A logs out and B logs in before A's hanging request returns a 401, B's session gets rotated or signed out. No data leaks. Fix: pass an `AbortSignal` or a session-generation check into `loadTodayTrips`, check it before `refresh`/`signOut`, and abort the `GET`.
+  - Security L2, `use-today-trips.ts` and `app/index.tsx`. The hook doesn't reset its state when `enabled` turns false. Stale trips (or a sticky `signed-out`) are hidden only because `<Redirect>` uses `router.replace` and unmounts the screen. Fix: reset to `loading` when it is disabled, and don't let `state.kind === 'signed-out'` override `status === 'signed-in'`.
+  - Security L3, `auth.ts` `logout()`. It doesn't revoke the session on the server yet. That is the T1.4o mobile half.
+  - Verifier L1: the tests exercise `loadTodayTrips` only. No render test covers the screen branches; the device run covered those by hand.
+  - Verifier L2: `use-health.ts` was removed. `health.ts` and its test remain.
+- Proposal: fold security L1 and L2 into the T1.4o mobile half, which touches the same auth flow, or into a small new task. Your call.
 - Next: the T1.4o mobile half is now unblocked (branch from mobile `main`, `pnpm gen:api`, driver `logout()` calls `/auth/logout` best-effort, tests). After that, T1.4p once ADR-017 is in DECISIONS.md.
 - Open questions: none.
 
