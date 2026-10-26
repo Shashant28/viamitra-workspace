@@ -35,6 +35,20 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Files: `viamitra-backend/.github/workflows/**`, `viamitra-mobile/.github/workflows/**`, `viamitra-web/.github/workflows/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T0.3, T0.4
   Done-when: each repo has a GitHub Actions workflow that runs its own `scripts/check.sh` with `CHECK_NO_SKIPS=1` (the workspace `scripts/verify.sh` is not in any repo). The backend workflow uses Postgres (PostGIS + TimescaleDB), Redis and EMQX service containers; every secret is generated per run (none stored in the repo or as fixed values); `backend/tests/test_health.py` and the DB tests run against those services with 0 skipped. Each workflow passes on a PR.
+- [ ] **T0.7 Local migration script `scripts/db-migrate.sh`** (from T1.4p: the agent couldn't redo an edited migration because the guard hook blocks loading `infra/local.env`; approved by human 2026-10-27)
+  Files: `viamitra-backend/scripts/db-migrate.sh` (new), `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T0.3
+  Rule:
+  - Usage: `bash scripts/db-migrate.sh <upgrade|downgrade> <rev> <dev|test|both>`. The script loads `infra/local.env` itself, like `scripts/dev-setup.sh` does. It runs `uv run alembic <upgrade|downgrade> <rev>` in `backend/`, using `DATABASE_URL` for dev and `TEST_ADMIN_DATABASE_URL` for test (the variables `dev-setup.sh` writes).
+  - It refuses to run, with a non-zero exit and nothing changed, unless `APP_ENV=dev` and the host of every target URL is `127.0.0.1` or `localhost`.
+  - It never prints a URL, password or any other env value. Error messages name the variable only.
+  - It prints `alembic current` for each target afterwards, like `dev-setup.sh`.
+  - No changes to `.claude/` or the guard hooks.
+  Done-when:
+  - `bash scripts/db-migrate.sh downgrade <head-1> both` then `bash scripts/db-migrate.sh upgrade head both` leaves both DBs at head.
+  - With `APP_ENV` other than `dev`, or a non-local host (shown by overriding the variable in the environment for that run), the script exits non-zero before calling alembic.
+  - Its output contains no value from `infra/local.env`. Check this by grepping the output for each password variable's value, inside the script's own self-test mode or by the human.
+  - `./scripts/verify.sh` passes with 0 skipped.
 
 ## Phase 1 — MVP
 
@@ -99,6 +113,12 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - the today's-trip screen (`app/index.tsx`): loading, trips list, empty, error with Retry, and the redirect to login after logout with no previous trips shown.
 
   `pnpm audit` adds no new high/critical finding, and `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.3i Driver refresh request timeout below the 10 s grace window** (from the T1.4p proposal; priority: before pilot; approved by human 2026-10-27)
+  Files: `viamitra-mobile/apps/driver/src/features/auth/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.4p
+  Why: since T1.4p (ADR-017), presenting a rotated refresh token more than 10 s after its rotation revokes the whole login chain. `runRefresh` (`apps/driver/src/features/auth/auth.ts:97-101`) has no timeout, and an `'unavailable'` result keeps the old token for a later retry. So after a lost response, a retry usually lands outside the window, signs the driver out and leaves a false reuse audit entry.
+  Rule: the `/auth/refresh` request aborts after a timeout under 8 s. A refresh token whose request may have reached the server is never re-sent once 10 s have passed since that request started: treat it as `'rejected'` instead (clear the keys and go back to login). Propose the exact timeout before implementing.
+  Done-when: `cd viamitra-mobile && pnpm --filter driver test` proves the refresh request aborts at the timeout, a retry within the window re-sends the same token, and a token whose request started more than 10 s earlier is never re-sent. `./scripts/verify.sh` passes with 0 skipped.
 - [x] **T1.4 Location ingest (MQTT → Redis → Timescale)** — Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/pyproject.toml`, `viamitra-backend/backend/uv.lock`, `viamitra-backend/.env.example`, `viamitra-backend/infra/emqx/acl*`, tests · Depends: T0.4
 - [x] **T1.4a Ingest worker reconnects to EMQX or exits non-zero on disconnect**
   Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/tests/test_ingest*`, `docs/TASKS.md`, `docs/PROGRESS.md`
@@ -164,7 +184,8 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Rule: the endpoint takes the refresh token in the body (rate-limited like `/auth/refresh`, unknown fields rejected) and sets `revoked_at` on that session only. It answers the same status whether or not the token was valid, so it can't be used to probe tokens. Propose separately (don't implement unasked) whether reusing an already-revoked refresh token should revoke the whole session family.
   Status 2026-10-27: done. Backend `a499a35`, web `ede1429`, mobile `a760626` (driver logout + T1.3d security L1/L2), all on `main`.
   Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_auth_flow.py -k logout` proves that after logout the same refresh token gets 401 at `/auth/refresh`, other sessions of the same user still refresh, and an unknown token gets the same response as a valid one. The driver `logout()` calls `/auth/logout` best-effort (a network failure still clears both keys), and `cd viamitra-mobile && pnpm --filter driver test` covers both paths. `openapi.json` and both generated clients are current. `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.4p Refresh-token reuse detection revokes the whole session chain** (from T1.4o security review; priority: before pilot; approved by human 2026-10-27)
+- [x] **T1.4p Refresh-token reuse detection revokes the whole session chain** (from T1.4o security review; priority: before pilot; approved by human 2026-10-27)
+  Status 2026-10-27: done. Backend `c8f3217` on `main` (migration `0011_refresh_reuse`). Contract unchanged; no client regen.
   Files: `viamitra-backend/backend/app/api/auth*`, `viamitra-backend/backend/app/models/*` (refresh session columns only), `viamitra-backend/backend/alembic/versions/*_refresh_reuse.py` (next free revision), `viamitra-backend/backend/tests/test_auth_flow.py`, `viamitra-backend/openapi.json`, `viamitra-mobile/packages/api-client/src/schema.d.ts` and `viamitra-web/packages/api-client/src/schema.d.ts` (only if the contract changes), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.4o (backend part), ADR-017 added to `docs/DECISIONS.md` by the human
   ADR-017 draft (human adds to DECISIONS.md): `| ADR-017 | Refresh tokens form a chain per login (family_id). Presenting a refresh token that was already rotated away revokes every session in its chain and is audited; the caller still gets the same 401. A token revoked by logout does not trigger this, and a short grace window (≤10 s) tolerates a client retrying the same token after a network failure. /auth/logout stays single-session. | Reuse of a rotated token is the standard sign of a stolen token (OAuth 2.0 Security BCP); without this, whoever refreshes first keeps the live chain |`
@@ -173,9 +194,26 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
 - [ ] **T1.4q Per-token rate limits for `/auth/refresh` and `/auth/logout`** (from T1.4o mobile security review; priority: before pilot; approved by human 2026-10-27)
   Files: `viamitra-backend/backend/app/api/auth*`, `viamitra-backend/backend/alembic/versions/*_auth_rate_keys.py` (only if the rate-limit SQL function must change; next free revision), `viamitra-backend/backend/tests/test_auth_flow.py`, `viamitra-backend/openapi.json` (only if the contract changes), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.4o
-  Why: `_enforce_rate_limit` (`app/api/auth.py:163`) keys every bucket on `request.client.host` only. On mobile carrier CGNAT many drivers share one IP, so one busy IP can 429 everyone's refresh/logout. The driver app ignores a 429 at logout, which leaves that refresh session live until it expires.
+  Why: `_enforce_rate_limit` (`app/api/auth.py:165`) keys every bucket on `request.client.host` only. On mobile carrier CGNAT many drivers share one IP, so one busy IP can 429 everyone's refresh/logout. The driver app ignores a 429 at logout, which leaves that refresh session live until it expires.
   Rule: refresh and logout get a bucket keyed on the hash of the presented refresh token (never the raw token), so each device/session has its own limit. A looser per-IP bucket stays as a flood guard. A 429 must look the same whether or not the token is valid (no probing). Propose the exact limits/windows and whether the per-IP bucket is kept for logout before implementing. Proxy-aware client IP (`--proxy-headers`/`--forwarded-allow-ips`) stays out of scope until the deploy topology is known.
   Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_auth_flow.py -k rate` proves that two different refresh tokens from the same IP each get their own refresh and logout budget, one token exceeding its budget gets 429 while another token from the same IP still succeeds, the per-IP flood guard still trips, and an unknown token's 429 matches a valid token's. `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.4r `auth_audit_events` table** (from the T1.4p proposal; prerequisite for any `/admin` audit view; approved by human 2026-10-27)
+  Files: `viamitra-backend/backend/app/models/*` (the new table only), `viamitra-backend/backend/alembic/versions/*_auth_audit_events.py` (next free revision), `viamitra-backend/backend/app/api/auth*`, `viamitra-backend/backend/tests/test_auth_flow.py`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.4p
+  Why: since T1.4p, a refresh-token reuse is recorded only as `refresh_sessions.reuse_detected_at` / `revoked_reason='reuse'` plus one `refresh_token_reuse` WARNING log line. There's no queryable audit trail for an admin view, and those columns go away if session rows are ever purged.
+  Rule: a tenant-scoped table (`org_id` + RLS) with an event type, the time, and ids only (`user_id`, `family_id`, sessions revoked). No token, hash, phone, IP or child PII. `auth_rotate_refresh_token` writes the reuse event in the same transaction. Propose the columns, which other auth events to record, and the retention before implementing.
+  Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_auth_flow.py -k audit` proves a refresh-token reuse writes exactly one event row in the caller's org that holds no token, hash or phone, and another org's runtime role can't read it. `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.4s Notify org admins on `refresh_token_reuse`** (from the T1.4p review; priority: low, after the admin dashboard exists; approved by human 2026-10-27)
+  Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/workers/notify*`, `viamitra-web/apps/dashboard/**`)
+  Depends: T1.4r, T1.8
+  Rule: org admins are told that a driver's or parent's session chain was revoked for suspected token theft. The message holds no token, phone or child PII. Propose the channel (dashboard notice and/or push) before implementing.
+  Done-when: to be defined when scoped.
+- [ ] **T1.4t Logout racing an in-window refresh retry leaves the new token live** (from the T1.4p task-verifier; priority: low; approved by human 2026-10-27)
+  Files: `viamitra-backend/backend/alembic/versions/*_logout_retry_race.py` (next free revision), `viamitra-backend/backend/tests/test_auth_flow.py`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.4p
+  Why: a refresh rotates A to B. The client then sends `/auth/logout` with B while a retry of A is still in the 10 s grace window. If the retry rotates B to C first, the logout waits on B's row lock, finds B already rotated, and answers 204. C stays live until it is used or expires (30 days), although the user logged out.
+  Rule: `auth_revoke_refresh_token` takes the same family root lock as `auth_rotate_refresh_token`. If the presented token was rotated by an in-window retry, the logout also revokes the live successor it led to (single chain only, never the whole family, per ADR-017). The response stays 204 for every input. Propose the exact rule before implementing.
+  Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_auth_flow.py -k logout` proves, with two connections, that a logout of B racing a retry of A leaves no live session in that family, and that another login's session is untouched. `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.5 WebSocket live position** — Files: `viamitra-backend/backend/app/api/ws*`, tests · Depends: T1.4
 - [ ] **T1.6 Parent live map + ETA** — Files: `viamitra-mobile/apps/parent/**` · Depends: T1.5
 - [ ] **T1.7 Geofence events + push** — Files: `viamitra-backend/backend/app/services/events/**`, `viamitra-backend/backend/app/workers/notify*`, tests with GPS fixtures · Depends: T1.4

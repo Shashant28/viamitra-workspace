@@ -1,4 +1,53 @@
 # Progress log
+## 2026-10-27 — T1.4p Refresh-token reuse detection revokes the session chain — done, committed, not pushed. T1.4p `[x]`
+- viamitra-backend only. Branch `task/T1.4p-refresh-reuse` from `main` at `a499a35`. One commit, `c8f3217` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
+- Human decisions (2026-10-27):
+  - The grace window is exactly 10 s.
+  - A retry inside the window is answered by a new rotation and 200.
+  - Audit is columns plus one WARNING log line for now; the audit table is T1.4r.
+  - All family rows are locked inside the SQL function, with a two-connection concurrency test.
+- Changed (`backend/` unless noted):
+  - `alembic/versions/0011_refresh_reuse.py` (new). It adds four `refresh_sessions` columns:
+    - `family_id` (NOT NULL, indexed; backfilled `= id`, so each existing row is its own family);
+    - `replaced_by` (FK to `refresh_sessions.id`);
+    - `revoked_reason` (CHECK `rotated|logout|reuse`; rows revoked before the migration stay NULL and never trigger detection);
+    - `reuse_detected_at`.
+  - The same migration drops and recreates `auth_rotate_refresh_token`. The signature is the same, the return is now `(outcome, user_id, org_id, role, family_id, sessions_revoked)`, and the owner and grants are re-applied. What it does:
+    - It locks the family root row (`id = family_id`), then all family rows, all scoped by `org_id`.
+    - Live token: normal rotation.
+    - Rotated ≤10 s ago (counted from the first rotation) and the replacement is unused: the replacement is rotated away instead, and the caller gets 200.
+    - Any other rotated token: every live session in the family gets `revoked_reason='reuse'`, the presented row gets `reuse_detected_at`, and the outcome is `reuse`.
+    - Already-flagged family, logout, legacy, expired or unknown: no rows returned.
+  - `auth_revoke_refresh_token` now also sets `revoked_reason='logout'`.
+  - `app/models/entities.py`: `RefreshSession` gets the new columns, the FK, the CHECK constraint and the index.
+  - `app/api/auth.py`:
+    - A login sets `family_id = session id`.
+    - `/auth/refresh` always commits, so the reuse revocation is kept, then returns the same 401 for every failure.
+    - On `reuse` it logs one `refresh_token_reuse family_id=… org_id=… user_id=… sessions_revoked=…` WARNING. No token, hash, phone or IP goes in it.
+  - `tests/test_auth_flow.py`, three new `-k reuse` tests:
+    - The chain is revoked; the 401 body and content-type match an unknown token's; there is exactly one audit line, with no token, hash or phone in it. Another login keeps refreshing. Replaying a logout-revoked token revokes nothing.
+    - A retry inside the window gets 200 and the replaced token later counts as reuse. A retry after the replacement was already used counts as reuse.
+    - Two connections, run in both orders: the second call waits on the lock, and the run ends with every session in the family revoked and exactly 1 marker.
+  - The existing rotation test now moves the rotation 11 s back before its replay-401 assertion, because an immediate replay is now a valid retry. The verifier judged this a legitimate adaptation.
+- `openapi.json`: unchanged after `export_openapi.py` (a route docstring would have changed the description, so it's a comment instead). No client regen.
+- Migrations: dev and test DBs at `0011_refresh_reuse (head)`. After the review fix, the human downgraded both to 0010 and `dev-setup.sh` re-applied 0011. That also exercised the downgrade path.
+- Verify: `./scripts/verify.sh` → `PASS viamitra-backend` (119 passed, 0 skipped; ruff, mypy, OpenAPI current, pip-audit all PASS), `PASS viamitra-mobile` (47 tests; 2 high ignored per ADR-016), `PASS viamitra-web`. The `-k reuse` Done-when ran inside `check.sh`: the agent can't load `infra/local.env` for a bare pytest run (T0.7 fixes that).
+- Reviews:
+  - task-verifier: READY, no FAILs.
+  - security-reviewer: no critical, high or medium findings. Fixed:
+    - L1, a deadlock: a waiter couldn't lock a family row inserted during its wait. The root row is now locked first.
+    - I1: `org_id` added to the family queries.
+  - Re-check after the fix: PASS.
+- **Deploy note (security L2):** the old API can't insert sessions without `family_id`. Stop old instances before running `alembic upgrade head` with 0011.
+- New tasks (human-approved): T0.7 (`scripts/db-migrate.sh`), T1.3i (driver refresh timeout under 8 s), T1.4r (`auth_audit_events`), T1.4s (notify org admins on reuse), T1.4t (logout racing an in-window retry). The T1.4q line ref was updated to `auth.py:165`.
+- Known and accepted:
+  - A token rotated away by a retry gets its own 10 s window. That allows no long-lived bypass, because any gap over 10 s revokes the family.
+  - Access tokens stay valid for up to 15 minutes after the family is revoked (they're stateless).
+  - The reuse path is a little slower than an unknown token (extra writes). Probing it needs a real rotated token and kills that family anyway.
+  - There's no deterministic test for L1: the race happens inside a single function call.
+- Constraint for any future session purge or retention job: never delete a family's root row while that family has live sessions. Without it, the lock serialization stops working.
+- Next step: T1.3i (driver refresh timeout), so lost responses stop signing drivers out once 0011 is deployed. T0.7 makes migration redos self-service.
+- Open questions: none.
 ## 2026-10-27 — T1.4o mobile half: driver logout revokes the session — done, committed, not pushed. T1.4o `[x]`
 - viamitra-mobile only (backend `a499a35` and web `ede1429` were already done). Branch `task/T1.4o-auth-logout` from mobile `main` at `01953c5`. One commit, `a760626` (`feat(driver)`), fast-forwarded into `main`; branch deleted.
 - Human decision: fold T1.3d security L1 and L2 into this task. The T1.4o Files list was extended to `apps/driver/src/features/trips/**` and `apps/driver/app/index.tsx`.
