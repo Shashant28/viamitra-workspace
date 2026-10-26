@@ -1,4 +1,61 @@
 # Progress log
+## 2026-10-26 — T1.3b Expo driver app scaffold — done, committed, not pushed
+- viamitra-mobile: committed on `task/T1.3b-driver-scaffold` (from `main` at `d6c343e`), fast-forwarded into `main`, branch deleted. `scripts/check.sh` (human's ADR-016 change) left uncommitted for the human. Workspace: committed on `main`, except `docs/DECISIONS.md` and `.claude/hooks/lib.sh` (protected; the human commits them).
+- Toolchain: Expo SDK 58 (`expo@58.0.19`), RN 0.88.0, React 19.3.0; compileSdk 37, targetSdk 36, build-tools 37.0.0, NDK 27.1.12297006 (from RN 0.88 `gradle/libs.versions.toml`, read by Expo's `expo-root-project` plugin; matches docs.expo.dev/versions). Human installed `platforms;android-37.0` and `ndk;27.1.12297006`. Commands run with Node 22 via a PATH prefix (CLAUDE.md "Toolchain").
+- Changed (viamitra-mobile):
+  - `apps/driver/package.json`: approved pins, plus `react-native-reanimated` 4.7.1, `react-native-worklets` 0.13.0, `react-native-gesture-handler` 3.3.0 (human decision; versions from SDK 58 `bundledNativeModules.json`). Before pinning, pnpm had auto-installed them as optional peers of `expo-router`, gesture-handler at 3.4.0.
+  - `apps/driver/app.config.ts`: dev build (`expo-dev-client` plugin), `com.viamitra.driver` (human-approved), `expo-router`, typed routes. `userInterfaceStyle` left out (needs `expo-system-ui`, not approved).
+  - `apps/driver/tsconfig.json` (Expo CLI added `expo-env.d.ts` to `include` on first run), `env.d.ts`, `eslint.config.js` (`eslint-config-expo/flat`), `.env.example` (`EXPO_PUBLIC_API_BASE_URL`, human-approved).
+  - `apps/driver/app/_layout.tsx`, `app/index.tsx`: thin screens; no hardcoded colours or font sizes (no `packages/ui` yet).
+  - `apps/driver/src/lib/api.ts`: base URL from a static `process.env.EXPO_PUBLIC_API_BASE_URL` (so Expo inlines it), throws if unset; client from `@viamitra/api-client`.
+  - `apps/driver/src/features/health/{health,use-health}.ts` + `__tests__/health.test.ts` (3 tests: GET `{base}/health` via mocked fetch, HTTP 503 error, missing env var).
+  - `pnpm-workspace.yaml`: `allowBuilds` denies `@parcel/watcher` and `unrs-resolver` install scripts (prebuilt darwin-arm64 binaries already present). `pnpm-lock.yaml`.
+- Verify:
+  - `pnpm --filter driver typecheck` / `lint` clean; `test` 3/3 pass.
+  - `expo run:android -d Pixel_9` (API 37, Android 17 emulator): BUILD SUCCESSFUL, APK installed, `com.viamitra.driver/.MainActivity` resumed, bundle loaded. Screen shows "API unreachable: ... Failed to connect to /10.0.2.2:8000", expected since no backend runs (T1.4n). iOS not built or tested.
+  - `./scripts/verify.sh` (final): all PASS. Backend 115 passed, 0 skipped; mobile typecheck/lint/tests (3) PASS and `JS audit (high+)` PASS with the ADR-016 ignores; web PASS.
+  - The first run failed mobile `JS audit (high+)` on two highs, now covered by ADR-016 (human-approved `--ignore` flags in `scripts/check.sh`):
+    - `node-forge` 1.4.0, GHSA-86w9-cpqp-85rv: no patched version exists (1.4.0 is latest).
+    - `zod` 3.25.76, GHSA-mrhx-c7xc-m3w5: fixed only in zod >=4.6.6; `@expo/cli` 58.1.15 (latest) requires `zod ^3.25.76`.
+    - Both reach the workspace only via `@expo/cli` (dev tooling on the developer machine, not in the APK).
+  - Side effect: `pnpm audit --ignore <GHSA>` (pnpm 12.15.0) writes `auditConfig.ignoreGhsas` into `pnpm-workspace.yaml` on every run; `pnpm help audit` lists no option to stop it. Human decision: the block is not committed; the `--ignore` flags in `check.sh` are the only exception mechanism. It was removed before the commit, but each `check.sh`/`verify.sh` run writes it back into the working tree.
+- Review: `task-verifier` READY, no FAIL. Its two follow-ups are handled here: PROGRESS updated, and the `auditConfig` block is recorded above. Minor gap noted: the cached `getApiClient()` isn't tested directly.
+- Incident (protected path, resolved): the first `expo run:android` wrote gitignored Gradle build outputs under the app's `android/app/build/intermediates/` tree, in folders named `assets`, which matched the protected app-assets pattern. Build stopped; human deleted the files and changed the guard so `android/`, `ios/`, `build/`, `.expo/`, `.next/`, `.gradle/`, `node_modules/` are never protected.
+- Decisions (human, 2026-10-26): pin the three native peers at SDK 58 versions; app IDs `com.viamitra.driver`/`com.viamitra.parent` and `EXPO_PUBLIC_API_BASE_URL` (ADR rows proposed in chat for the human to add); ignore the `react-dom@19.3.1` peer warning; T1.4n added for backend `uvicorn`.
+- Protected files changed this session, by the human (not Claude): `viamitra-mobile/scripts/check.sh` (audit `--ignore` for the two GHSAs, ADR-016) and `docs/DECISIONS.md` (ADR-014, ADR-015, ADR-016). Claude only read them. The stop hook flagged both; not restored.
+- Expo upgrade notes (recheck on every Expo SDK / `@expo/cli` upgrade):
+  - ADR-016: check whether `@expo/cli` still pulls `node-forge` <=1.4.0 (GHSA-86w9-cpqp-85rv) or `zod` <4.6.6 (GHSA-mrhx-c7xc-m3w5). If either is fixed, the human removes its `--ignore` from `viamitra-mobile/scripts/check.sh` and updates ADR-016.
+  - Re-check the pinned native peers (`react-native-reanimated`, `react-native-worklets`, `react-native-gesture-handler`) and `typescript` against the new SDK's `bundledNativeModules.json` / `expo install --check`.
+  - ADR-016 cleanup also needs the `auditConfig.ignoreGhsas` block deleted from `viamitra-mobile/pnpm-workspace.yaml` if it has been written back.
+- TypeScript stays 5.9.3 (human); T1.3e bumps it to SDK 58's expected `~6.0.3`.
+- Next: the human commits `viamitra-mobile/scripts/check.sh`, `docs/DECISIONS.md` and `.claude/hooks/lib.sh`. Then T1.3c (driver OTP login).
+- Open question: every `check.sh` run rewrites `auditConfig.ignoreGhsas` into `viamitra-mobile/pnpm-workspace.yaml`, so the mobile tree is dirty after each verify. Options: (a) `check.sh` restores the file after the audit, (b) the human accepts committing the block (which also silences plain `pnpm audit`), (c) live with deleting it by hand. `check.sh` is protected, so this is the human's call.
+## 2026-10-26 — T1.4l API docs routes only in dev — done, not committed
+- Branch: viamitra-backend `task/T1.4l-docs-dev-only` (from `main` at `250316c`). Mobile and web are untouched.
+- Changed (viamitra-backend):
+  - `backend/app/main.py`: new `create_app()`.
+    - It reads `APP_ENV` when called. `openapi_url`, `docs_url` and `redoc_url` are `None` unless the value is exactly `"dev"` (unset or anything else counts as prod, same rule as `services/db.py:68`).
+    - FastAPI registers `/docs/oauth2-redirect` only when both `openapi_url` and `docs_url` are set, so it is gated too.
+    - `app = create_app()`. `health` is now a module-level function, so the allowlist pin `app.main.health` still holds.
+    - `app.openapi()` doesn't depend on `openapi_url`, so `scripts/export_openapi.py` is unchanged and gives the same `openapi.json` in every mode.
+  - `backend/tests/test_docs_routes.py` (new):
+    - All four paths return 404 for unset, `prod`, `test`, `Dev`, `DEV`, `" dev"` and `"dev "`, and 200 for `dev`.
+    - The schema is identical for unset, prod and dev.
+  - `backend/tests/test_route_auth.py`:
+    - The docs entries moved to `DEV_DOCS_ROUTES`. `public_routes()` adds them only when `APP_ENV == "dev"`, and `route_auth_problems`/`stale_public_routes` default to it.
+    - New test: `create_app()` under unset, prod and dev has no unguarded routes and no stale entries.
+    - The startup test now runs the lifespan on a fresh `create_app()`.
+- Verify:
+  - `./scripts/verify.sh`: all PASS; backend 115 passed, 0 skipped.
+  - `test_docs_routes.py` + `test_route_auth.py` pass with `APP_ENV` unset, `prod` and `dev`.
+  - `export_openapi.py` with unset, prod, staging and dev: `openapi.json` unchanged.
+- Reviews:
+  - `task-verifier`: READY, no FAIL.
+  - `security-reviewer`: no Critical, High or Medium.
+    - Info 3 fixed: whitespace and upper-case variants added.
+    - Low 1 not changed: the module-level `app` is built at import while `public_routes()` reads `APP_ENV` when the test runs. A mismatch fails the test rather than hiding a route.
+- Next: the human reviews and commits on the branch, then merges into `main` with ff-only. Then T1.4m (it needs a proposal approved before implementing).
+- Open questions: none.
 ## 2026-10-26 — T1.3a Backend `GET /trips/today` for drivers — done, committed, not pushed
 - Committed on each repo's `main` (fast-forward merge; task branches deleted):
   - viamitra-backend `250316c`

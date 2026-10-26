@@ -51,7 +51,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
     - parent, org_admin and super_admin tokens get 403; missing or invalid tokens get 401;
     - org scoping comes from the verified token via `get_tenant_session`, never from the request.
   Also: `uv run pytest -q tests/test_route_auth.py` passes with the route not on the public allowlist; `openapi.json` is re-exported and `pnpm gen:api` in both JS repos shows no diff on a second run; `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.3b Expo driver app scaffold** (approved by human 2026-10-26)
+- [x] **T1.3b Expo driver app scaffold** (approved by human 2026-10-26)
   Files: `viamitra-mobile/apps/driver/**` (except generated `android/`, `ios/`), `viamitra-mobile/pnpm-lock.yaml`, `viamitra-mobile/pnpm-workspace.yaml` (only if needed), `viamitra-mobile/scripts/check.sh` (only to include the app's checks), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.3
   Rule: before installing anything, propose each dependency with its version verified by `npm view <pkg> version` (and Expo SDK compatibility), then wait for the human's approval. Pin exact versions.
@@ -64,6 +64,11 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Files: `viamitra-mobile/apps/driver/**` (except generated `android/`, `ios/`), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.3a, T1.3c
   Done-when: after login, the driver sees today's trips from `GET /trips/today` via the generated client, with loading, empty ("no trip today"), error and 401 states (a 401 triggers one refresh, then logout). No child PII is logged. `cd viamitra-mobile && pnpm --filter driver test` covers each state with a mocked client. `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.3e Bump TypeScript to the Expo SDK 58 expected version** (from T1.3b; approved by human 2026-10-26)
+  Files: `viamitra-mobile/package.json`, `viamitra-mobile/apps/driver/package.json`, `viamitra-mobile/packages/**/package.json` (only the `typescript` pin), `viamitra-mobile/pnpm-lock.yaml`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.3b
+  Rule: take the version from `pnpm --filter driver exec expo install --check` (currently `~6.0.3`), confirm the exact patch with `npm view typescript@<range> version`, and get approval before installing. Pin exactly. viamitra-mobile only.
+  Done-when: `pnpm --filter driver exec expo install --check` reports no outdated packages; `cd viamitra-mobile && pnpm --filter driver typecheck && pnpm --filter driver lint && pnpm --filter driver test` pass; `./scripts/verify.sh` passes with 0 skipped.
 - [x] **T1.4 Location ingest (MQTT → Redis → Timescale)** — Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/pyproject.toml`, `viamitra-backend/backend/uv.lock`, `viamitra-backend/.env.example`, `viamitra-backend/infra/emqx/acl*`, tests · Depends: T0.4
 - [x] **T1.4a Ingest worker reconnects to EMQX or exits non-zero on disconnect**
   Files: `viamitra-backend/backend/app/workers/ingest*`, `viamitra-backend/backend/tests/test_ingest*`, `docs/TASKS.md`, `docs/PROGRESS.md`
@@ -109,7 +114,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Files: `viamitra-backend/backend/app/api/auth*`, `viamitra-backend/backend/tests/test_auth_flow.py`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.4h
   Done-when: access-token signing, OTP hashing and rate-limit key hashing each use a distinct key (derived per purpose from `AUTH_TOKEN_SECRET`, or separate env vars documented in `viamitra-backend/.env.example` if a new ADR chooses that); a test shows a value produced for one purpose does not verify or match for another; existing auth tests still pass; `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.4l API docs routes only in dev** (from T1.3 security review; do right after T1.3a; approved by human 2026-10-26)
+- [x] **T1.4l API docs routes only in dev** (from T1.3 security review; do right after T1.3a; approved by human 2026-10-26)
   Files: `viamitra-backend/backend/app/main.py`, `viamitra-backend/backend/tests/test_docs_routes.py`, `viamitra-backend/backend/tests/test_route_auth.py` (docs allowlist entries made conditional on `APP_ENV`), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.3a
   Done-when: `/openapi.json`, `/docs`, `/docs/oauth2-redirect` and `/redoc` are served only when `APP_ENV == "dev"`; unset, `prod` or any other value disables them (the same "unset means prod" rule as `app/services/auth.py` and `app/services/db.py`). `cd viamitra-backend/backend && uv run pytest -q tests/test_docs_routes.py` proves those four paths return 404 with `APP_ENV` unset and with `prod`, and 200 with `dev`. `uv run python scripts/export_openapi.py` still produces an unchanged `openapi.json` in every mode. `tests/test_route_auth.py` passes in both modes with no stale allowlist entries. `./scripts/verify.sh` passes with 0 skipped.
@@ -118,6 +123,11 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Depends: T1.3a, T1.4
   Rule: before implementing, propose how the auto-close runs (Celery is not installed; any new dependency or scheduler is approved first) and which DB role performs it. `viamitra_ingest` keeps read-only, column-level access to `trips` (add `SELECT (service_date)` only).
   Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_ingest.py -k service_date` proves a point for an `active` trip whose `service_date` is not today in Asia/Kolkata (ADR-013) is rejected: not written to history, not written to Redis, not published. A point for today's active trip is still accepted. `uv run pytest -q tests/test_trip_close.py` proves `active` (and `scheduled`) trips with `service_date` before today are closed (`completed`/`cancelled` with `ended_at` set, as proposed and approved), today's trips are untouched, and the close is scoped per org under RLS. `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.4n Backend `uv run uvicorn` works** (found in T1.3b; approved by human 2026-10-26)
+  Files: `viamitra-backend/backend/pyproject.toml`, `viamitra-backend/backend/uv.lock`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T0.4
+  Rule: propose the exact `uvicorn` version (verified with `pip index versions uvicorn`) and wait for approval before adding it. Pin it exactly.
+  Done-when: from a shell with an unrelated `VIRTUAL_ENV` active, `cd viamitra-backend/backend && uv run uvicorn app.main:app --port 8000` starts the API from the project env (not a global/Anaconda `uvicorn`), and `curl -s localhost:8000/health` answers 200. `uv run pip-audit` shows no new high/critical finding. `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.5 WebSocket live position** — Files: `viamitra-backend/backend/app/api/ws*`, tests · Depends: T1.4
 - [ ] **T1.6 Parent live map + ETA** — Files: `viamitra-mobile/apps/parent/**` · Depends: T1.5
 - [ ] **T1.7 Geofence events + push** — Files: `viamitra-backend/backend/app/services/events/**`, `viamitra-backend/backend/app/workers/notify*`, tests with GPS fixtures · Depends: T1.4

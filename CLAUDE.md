@@ -21,6 +21,9 @@ Read those only when the current task needs them. Don't load them all by default
 - Fix root causes. No `@ts-ignore`, `any`, `# type: ignore`, bare `except:`, or disabled lint rules without a comment and user approval.
 - Failed the same fix twice? Stop, summarize what you tried, ask.
 
+## Toolchain
+- Claude's shell doesn't read `~/.zshrc`, and `/Users/apple/.local/bin/node` (v26) shadows Node 22. Run every Node/pnpm/Expo/adb command with `PATH=/opt/homebrew/opt/node@22/bin:/Users/apple/Library/Android/sdk/platform-tools:/Users/apple/Library/Android/sdk/emulator:$PATH ANDROID_HOME=/Users/apple/Library/Android/sdk`. Check `node -v` shows v22 before installing.
+
 ## Commands
 - Install: `cd viamitra-backend/backend && uv sync` · `cd viamitra-mobile && pnpm install` · `cd viamitra-web && pnpm install`
 - Verify everything (all three repos): `./scripts/verify.sh` · one repo: `bash scripts/check.sh` inside it
