@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for ViaMitra guard hooks.
-# Portable to macOS's bash 3.2: no globstar, no mapfile, no associative arrays.
-# Requires: jq.
-
+# Shared helpers for ViaMitra guard hooks. Portable to macOS bash 3.2. Requires: jq.
 ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PATTERNS_FILE="$ROOT/.claude/protected-paths.txt"
 STATE_DIR="$ROOT/.claude/.state"
@@ -12,7 +9,6 @@ load_patterns() {
   [[ -f "$PATTERNS_FILE" ]] || return 0
   sed -e 's/#.*$//' -e 's/[[:space:]]*$//' -e '/^$/d' "$PATTERNS_FILE"
 }
-
 PATTERNS=()
 while IFS= read -r _p; do PATTERNS[${#PATTERNS[@]}]="$_p"; done < <(load_patterns)
 unset _p
@@ -27,6 +23,9 @@ to_rel() {
 
 is_protected() {
   local rel="$1" pat tail
+  case "/$rel/" in
+    */node_modules/*|*/android/*|*/ios/*|*/build/*|*/.expo/*|*/.next/*|*/.gradle/*|*/.venv/*) return 1 ;;
+  esac
   for pat in "${PATTERNS[@]}"; do
     if [[ "$rel" == $pat || "$rel" == $pat/* ]]; then echo "$pat"; return 0; fi
     if [[ "$pat" == '**/'* ]]; then
@@ -42,7 +41,7 @@ list_protected_files() {
     cd "$ROOT" || exit 0
     find . \
       \( -name .git -o -name node_modules -o -name .venv -o -name Pods -o -name .state \
-         -o -path './apps/*/android/build' -o -path './apps/*/ios/build' \) -prune -o \
+         -o -name android -o -name ios -o -name build -o -name .expo -o -name .next -o -name .gradle \) -prune -o \
       -type f -print 2>/dev/null \
     | sed 's#^\./##' \
     | while IFS= read -r f; do
