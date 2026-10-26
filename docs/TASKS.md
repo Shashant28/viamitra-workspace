@@ -113,7 +113,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - the today's-trip screen (`app/index.tsx`): loading, trips list, empty, error with Retry, and the redirect to login after logout with no previous trips shown.
 
   `pnpm audit` adds no new high/critical finding, and `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.3i Driver refresh request timeout below the 10 s grace window** (from the T1.4p proposal; priority: before pilot; approved by human 2026-10-27)
+- [x] **T1.3i Driver refresh request timeout below the 10 s grace window** (from the T1.4p proposal; priority: before pilot; approved by human 2026-10-27)
   Files: `viamitra-mobile/apps/driver/src/features/auth/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.4p
   Why: since T1.4p (ADR-017), presenting a rotated refresh token more than 10 s after its rotation revokes the whole login chain. `runRefresh` (`apps/driver/src/features/auth/auth.ts:97-101`) has no timeout, and an `'unavailable'` result keeps the old token for a later retry. So after a lost response, a retry usually lands outside the window, signs the driver out and leaves a false reuse audit entry.

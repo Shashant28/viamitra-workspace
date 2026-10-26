@@ -1,4 +1,33 @@
 # Progress log
+## 2026-10-27 — T1.3i Driver refresh timeout below the 10 s reuse window — done, committed, not pushed. T1.3i `[x]`
+- viamitra-mobile only. Branch `task/T1.3i-refresh-timeout` from `main` at `a760626`. One commit, `d579e9e` (`fix(driver)`), fast-forwarded into `main`; branch deleted.
+- Human decisions (2026-10-27):
+  - `REFRESH_TIMEOUT_MS = 3000`. The first pick was 5000. It was changed after security review finding #1: with a timeout T, a retry is only safe until 10 s − T after the first send, because the server may handle the retry up to T after it is sent. So the re-send cutoff is 7 s, which leaves about 4 s for a retry after one timeout.
+  - Strict rule: the client can't tell "offline" from "response lost", so any thrown or aborted request starts the clock. A driver who stays offline past the cutoff while a refresh is attempted goes back to login. Accepted.
+- Changed (`apps/driver/src/features/auth/`):
+  - `auth.ts`:
+    - `REFRESH_TIMEOUT_MS`, `REFRESH_REUSE_WINDOW_MS` (10 s) and `RESEND_CUTOFF_MS` (window − timeout).
+    - `unanswered` holds the token whose request got no backend answer, plus the start time of its FIRST such request. Retries don't restart the clock.
+    - `runRefresh` aborts the POST after the timeout. At or past the cutoff it doesn't send: it clears the keys and returns `'rejected'`. The marker stays, so the token is refused again even if clearing the keys failed.
+    - The clock is cleared only by responses that prove the backend handled the token (`backendHandled`): data (rotated), 429 (rate limit runs before rotation, `viamitra-backend/backend/app/api/auth.py:354`), or 400/401/403/422. Every 5xx keeps the clock, because a gateway 502/504 may arrive after the backend already rotated. This deviates from the option text first shown to the human ("5xx clears the clock"), per security finding #2.
+    - New `signal.aborted` check after `loadTokens()`: a refresh that started before logout no longer sends the old token. `logout` resets `unanswered`.
+  - `__tests__/auth.test.ts`:
+    - `beforeEach` calls `logout` with an empty store to reset module state.
+    - New fake-timer tests: abort at the timeout; a retry inside the cutoff re-sends the same token; never re-sent at the cutoff or at 10 s; a timeout starts the clock; the marker survives a failed key clear; 401/429 end the clock; 500/502/503/504 keep it; no send after logout.
+    - The existing "hanging refresh after logout" test now uses fake timers so its pending timeout doesn't keep Jest alive.
+    - Mutation-checked: removing the abort check, the gateway rule or the marker each fails its test.
+- Verify: workspace verify all PASS. Backend 119 passed. Mobile 61 passed (was 47). Web PASS. 0 skipped. Mobile audit: 2 high, already reviewed and ignored.
+- Reviews:
+  - task-verifier: READY (on the first version).
+  - security-reviewer: no critical or high findings. Fixed #1 (cutoff), #2 (gateway 5xx), #3 (marker kept when the clear fails) and #5 (send after logout). Not done: #4 and #6, see open questions.
+- Not tested on a device or emulator (unit tests only).
+- Next step: T1.3h render tests, or the next `[ ]` task.
+- Open questions:
+  - The clock is `Date.now()`, so a wall-clock jump (NTP sync on reconnect) can stretch or shrink the window (security finding #4). `performance.now()` would be monotonic, but I couldn't find it in React Native 0.88's type definitions, so it is UNVERIFIED. Confirm the typing, then switch.
+  - The clock lives in memory: if the app is killed after a lost response, a relaunch can re-send the token past the window. Accepted for now; persisting the start time in secure-store would close it.
+  - A token given up locally is not revoked on the server (finding #6). Sending it to `/auth/logout` could itself count as reuse server-side. Decide whether `/auth/logout` should accept a recently rotated token.
+  - UX: drivers in poor coverage will be sent back to login more often. Watch this in the pilot.
+
 ## 2026-10-27 — T1.4p Refresh-token reuse detection revokes the session chain — done, committed, not pushed. T1.4p `[x]`
 - viamitra-backend only. Branch `task/T1.4p-refresh-reuse` from `main` at `a499a35`. One commit, `c8f3217` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
 - Human decisions (2026-10-27):
