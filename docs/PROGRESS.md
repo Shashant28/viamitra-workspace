@@ -1,4 +1,69 @@
 # Progress log
+## 2026-10-27 — T1.3d Driver "today's trip" screen — done, committed, not pushed
+- viamitra-mobile only. This session resumed work left uncommitted on `task/T1.3d-driver-today-trip` by a cleared session (branched from `main` at `a3d6177`). The code was already written; this session did the device test, verify and commit. One commit, `01953c5` (`feat(driver)`), fast-forwarded into `main`; branch deleted.
+- Changed (`apps/driver`):
+  - `src/features/trips/today-trips.ts`: `loadTodayTrips` calls `GET /trips/today` through the generated client. Outcomes:
+    - It returns loading, trips, empty ("No trip today"), error or signed-out.
+    - A 401 (or no stored tokens) triggers exactly one `refresh()` and one retry.
+    - A rejected refresh, or a second 401, signs out.
+    - An unavailable refresh (offline, 429, 5xx) shows an error and keeps the session.
+    - Error messages are fixed strings.
+  - `src/features/trips/use-today-trips.ts`: the hook, with `reload`.
+  - `app/index.tsx`: the today's-trips screen with Retry/Refresh and pull to refresh.
+  - `src/features/auth/auth-context.tsx`: `refresh()` now returns the `RefreshOutcome` instead of a boolean.
+  - `src/features/health/use-health.ts`: removed (the scaffold health check is no longer used).
+  - `src/features/trips/__tests__/today-trips.test.ts`: 10 tests covering each state, the 401 → one refresh → retry path, a second 401, a rejected refresh, an unavailable refresh, missing tokens, and no trip data or token in logs.
+- Device test, Pixel_9 emulator, dev build, local API, driver +919990000001 / OTP 123456:
+  - (1) The access token issued at 19:45 UTC had expired by 20:09. Pull to refresh got the 401, then exactly one `/auth/refresh`: the dev DB showed the 19:45 session revoked and one new session at 20:09:48, and no others. The trips list then loaded.
+  - (2) I revoked that new session in the dev DB and waited for its access token to expire (20:25:20). Pull to refresh got the 401 and the refresh was rejected (no new session was created). The app returned to Driver login.
+  - (3) Logging in again (phone → OTP) went straight back to today's trips.
+  - `adb logcat` for ReactNativeJS: no phone number, token or trip data.
+- Verify: `./scripts/verify.sh` PASS for all three repos: backend 116 passed with 0 skipped; mobile 32 tests, 2 high audit findings already ignored; web all PASS.
+- Not done in this session: task-verifier and security-reviewer. The previous session may have run them, but it left no record.
+- Next: the T1.4o mobile half is now unblocked (branch from mobile `main`, `pnpm gen:api`, driver `logout()` calls `/auth/logout` best-effort, tests). After that, T1.4p once ADR-017 is in DECISIONS.md.
+- Open questions: none.
+
+## 2026-10-27 — T1.4o `POST /auth/logout` — backend + web done and committed (not pushed), mobile half deferred, task stays `[~]`
+- Human decision: viamitra-mobile has uncommitted T1.3d work on `task/T1.3d-driver-today-trip` that already changes `auth-context.tsx`. The mobile half is therefore deferred until T1.3d is on mobile `main`. Nothing in viamitra-mobile was touched.
+- Branches `task/T1.4o-auth-logout` from `main` in viamitra-backend (`ab5a202`) and viamitra-web (`24cb348`). Committed as backend `a499a35` (`feat(backend): POST /auth/logout revokes one refresh session`) and web `ede1429` (`chore(api-client): regenerate for POST /auth/logout`), fast-forwarded into each `main`, branches deleted.
+- Backend changes:
+  - `backend/app/api/auth.py`: `POST /auth/logout` takes `RefreshRequest` (body, `extra="forbid"`). It uses its own `"logout"` rate-limit bucket, the same way `/auth/refresh` does. It always answers an empty 204, whether the token is valid, unknown, expired or already revoked.
+  - `backend/alembic/versions/0010_auth_logout.py` (new): `auth_revoke_refresh_token(text) RETURNS void`, a SECURITY DEFINER function with the same hardening as `auth_rotate_refresh_token`. It is owned by `viamitra_auth_owner`, revoked from PUBLIC and granted to `viamitra_app`. It sets `revoked_at` on the one matching live row. It is needed because logout knows no org, so the runtime role can't find the session under RLS. Dev and test DBs were migrated with `scripts/dev-setup.sh`.
+  - `backend/tests/test_auth_flow.py`: `test_logout_revokes_only_that_session` covers:
+    - after logout, the same token gets 401 at `/auth/refresh`;
+    - the user's second session still refreshes;
+    - unknown and already-revoked tokens get the same status, body and content-type;
+    - an extra field gets 422 and the rate limit gets 429;
+    - the DB ends with 2 revoked rows and 1 live row.
+  - `backend/tests/test_route_auth.py`: `/auth/logout` added to the public allowlist.
+  - `openapi.json`: regenerated.
+- Web change: `packages/api-client/src/schema.d.ts` regenerated with `pnpm gen:api`.
+- Verify:
+  - `CHECK_NO_SKIPS=1 bash scripts/check.sh` (backend): ruff, mypy, 116 passed with 0 skipped, OpenAPI current, pip-audit: all PASS.
+  - `./scripts/verify.sh`: PASS for backend, mobile and web. The mobile run includes the T1.3d work in progress: 32 tests, 2 high audit findings already ignored.
+  - The exact command `uv run pytest -q tests/test_auth_flow.py -k logout` couldn't be run by itself: the guard hook blocks any command that sources `infra/local.env`. The new test ran inside `check.sh` with no skips.
+- Reviews:
+  - task-verifier: READY, no FAIL.
+  - security-reviewer: no critical or high findings. Lows to know about:
+    - (a) An access JWT stays valid for up to 15 minutes after logout. This is stateless by design; a `sid` claim check would need an ADR.
+    - (b) Rate limits are keyed on `request.client.host`, so behind a proxy all clients share one bucket. Configure `--proxy-headers`/`--forwarded-allow-ips` once the deploy topology is known. This already applies to every auth route.
+    - (c) No migration does `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (matters only on a cluster upgraded from PG≤14).
+    - (d) The OpenAPI spec for the auth routes doesn't list 429.
+- Remaining for T1.4o, once T1.3d is on mobile `main`:
+  - branch `task/T1.4o-auth-logout` in viamitra-mobile;
+  - run `pnpm gen:api`;
+  - make the driver `logout()` call `/auth/logout` best-effort (any failure, including 429 or 5xx, still clears both keys);
+  - add `pnpm --filter driver test` cases for both paths;
+  - run verify, then tick `[x]`.
+- Proposal (not implemented, needs your decision and probably an ADR): revoke the whole session family when an already-rotated refresh token is reused at `/auth/refresh`. That is the standard sign of a stolen token. Today the attacker who refreshes first keeps the live chain.
+  - Sketch: add `refresh_sessions.family_id` and a revoke reason (rotated or logout), so only reuse of a rotated token triggers it.
+  - Keep the 401 unchanged, so the response can't be used to probe tokens.
+  - Allow a few seconds of grace for client retries.
+  - Audit the event.
+  - `/auth/logout` stays single-session.
+- Proposal approved by the human 2026-10-27 as T1.4p (ADR-017 draft in its task text, for the human to add to DECISIONS.md).
+- Open questions: a background job "Wait until the device access token has expired" reported finishing in this session, but this session didn't start it. It probably belongs to the T1.3d session.
+
 ## 2026-10-26 — T1.3c Driver OTP login screen — done, committed, not pushed
 - viamitra-mobile only, on `task/T1.3c-driver-otp-login` from `main` at `8f0f690`. Two commits, `4f87011` (`chore(ci)`: audit ignores, below) and `3a241dc` (`feat(driver)`), fast-forwarded into `main`. Branch deleted. Backend and web code are untouched.
 - Dependency: `expo-secure-store` 58.0.2 (human-approved; it matches the SDK 58 bundled range `~58.0.2`), pinned exactly. It's a native module, so the driver dev build has to be rebuilt (`pnpm --filter driver android`).
