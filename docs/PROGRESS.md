@@ -1,4 +1,18 @@
 # Progress log
+## 2026-10-26 — T1.4n Backend `uv run uvicorn` works — done, committed, not pushed
+- viamitra-backend: first committed T1.4l (`4c7d41b`, human-approved) and fast-forwarded it into `main`, deleting `task/T1.4l-docs-dev-only`. T1.4n then went on `task/T1.4n-uvicorn` from `main` at `4c7d41b`, was fast-forwarded into `main`, and the branch was deleted. Mobile and web are untouched.
+- Cause: `uvicorn` wasn't a project dependency. `uv run uvicorn` fell through PATH to `/opt/anaconda3/bin/uvicorn`.
+- Changed (viamitra-backend):
+  - `backend/pyproject.toml`: `uvicorn==0.54.0` (human-approved; latest on PyPI, released 2026-09-25). Plain package, not `[standard]`. `--reload` falls back to polling.
+  - `backend/uv.lock`: adds `uvicorn` 0.54.0 and its new transitive dependency `click` 8.5.0. `h11` was already locked.
+- Verify:
+  - With unrelated `VIRTUAL_ENV=/Users/apple/Downloads/viamitra-claude-kit/.venv` active, `uv run which uvicorn` gives `backend/.venv/bin/uvicorn`, and `uv run uvicorn --version` gives 0.54.0.
+  - Human ran `uv run uvicorn app.main:app --port 8000` with `infra/local.env` loaded (`APP_ENV=dev`, after `dev-setup.sh`). `curl /health` answered HTTP 200. The agent can't load `infra/local.env` (guard hook). Without it, startup fails closed on `AUTH_TOKEN_SECRET`, as designed.
+  - `uv run pip-audit`: no known vulnerabilities.
+  - `./scripts/verify.sh`: all PASS. Backend 115 passed, 0 skipped. Mobile and web PASS.
+  - task-verifier: no FAIL. Security review skipped: there are no auth, tenancy, worker, MQTT or token changes.
+- Next: first `[ ]` task whose dependencies are done (T1.4 chain / T1.5).
+- Open: `starlette.testclient` warns that `httpx` is deprecated in favour of `httpx2`. It's harmless for now; decide later whether to switch.
 ## 2026-10-26 — T1.3b Expo driver app scaffold — done, committed, not pushed
 - viamitra-mobile: committed on `task/T1.3b-driver-scaffold` (from `main` at `d6c343e`), fast-forwarded into `main`, branch deleted. `scripts/check.sh` (human's ADR-016 change) left uncommitted for the human. Workspace: committed on `main`, except `docs/DECISIONS.md` and `.claude/hooks/lib.sh` (protected; the human commits them).
 - Toolchain: Expo SDK 58 (`expo@58.0.19`), RN 0.88.0, React 19.3.0; compileSdk 37, targetSdk 36, build-tools 37.0.0, NDK 27.1.12297006 (from RN 0.88 `gradle/libs.versions.toml`, read by Expo's `expo-root-project` plugin; matches docs.expo.dev/versions). Human installed `platforms;android-37.0` and `ndk;27.1.12297006`. Commands run with Node 22 via a PATH prefix (CLAUDE.md "Toolchain").

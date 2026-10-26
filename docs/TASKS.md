@@ -123,7 +123,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Depends: T1.3a, T1.4
   Rule: before implementing, propose how the auto-close runs (Celery is not installed; any new dependency or scheduler is approved first) and which DB role performs it. `viamitra_ingest` keeps read-only, column-level access to `trips` (add `SELECT (service_date)` only).
   Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_ingest.py -k service_date` proves a point for an `active` trip whose `service_date` is not today in Asia/Kolkata (ADR-013) is rejected: not written to history, not written to Redis, not published. A point for today's active trip is still accepted. `uv run pytest -q tests/test_trip_close.py` proves `active` (and `scheduled`) trips with `service_date` before today are closed (`completed`/`cancelled` with `ended_at` set, as proposed and approved), today's trips are untouched, and the close is scoped per org under RLS. `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.4n Backend `uv run uvicorn` works** (found in T1.3b; approved by human 2026-10-26)
+- [x] **T1.4n Backend `uv run uvicorn` works** (found in T1.3b; approved by human 2026-10-26)
   Files: `viamitra-backend/backend/pyproject.toml`, `viamitra-backend/backend/uv.lock`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T0.4
   Rule: propose the exact `uvicorn` version (verified with `pip index versions uvicorn`) and wait for approval before adding it. Pin it exactly.
