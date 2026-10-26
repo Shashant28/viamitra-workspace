@@ -17,3 +17,4 @@ Human-edited only. Claude proposes a new ADR in chat; it never edits this file.
 | ADR-011 | Location history retention: 7 days | DPDP minimisation |
 | ADR-012 | Monorepo: pnpm workspaces + Turborepo; Python via uv | Shared types, one CI |
 | ADR-013 | "Today" and all service dates use Asia/Kolkata; timestamps stored in UTC | Pilot is in Delhi NCR; one business timezone avoids off-by-one-day bugs |
+| ADR-016 | Mobile audit ignores GHSA-86w9-cpqp-85rv (node-forge) and GHSA-mrhx-c7xc-m3w5 (zod 3) only | Both come solely via @expo/cli (dev tooling, not shipped in the app) with no compatible fix; recheck on every Expo SDK/CLI upgrade and remove when fixed |
