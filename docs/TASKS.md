@@ -50,6 +50,27 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - Its output contains no value from `infra/local.env`. Check this by grepping the output for each password variable's value, inside the script's own self-test mode or by the human.
   - `./scripts/verify.sh` passes with 0 skipped.
 
+- [ ] **T0.8 Production run config for the API** (from the T1.5 security review M1; priority: before pilot; approved by human 2026-10-27)
+  Files: `viamitra-backend/backend/Dockerfile` (new), `viamitra-backend/backend/.dockerignore` (new), `viamitra-backend/backend/tests/test_run_config.py` (new), `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T0.2, T1.4n, T1.5
+  Why: no production start command exists, so uvicorn runs with its defaults. Those defaults are a 16 MiB `ws_max_size` and per-message deflate on, which lets an unauthenticated socket make the server buffer up to 16 MiB before the 4 KB frame check in `app/api/ws.py` runs.
+  Rule:
+  - The start command is exec form: `uvicorn app.main:app` with `--ws-max-size 16384` and `--ws-per-message-deflate false`.
+  - No dev flags: no `--reload`, no `APP_ENV=dev`, no `--proxy-headers`/`--forwarded-allow-ips` (those stay out until the deploy topology is known, as in T1.4q).
+  - The image runs as a non-root user.
+  - Dependencies come from `uv sync --frozen --no-dev`.
+  - No secrets or `.env*` files in the image: `.dockerignore` excludes `.env*`, `.venv`, tests and caches. Configuration is read only from the runtime environment.
+  - Propose the exact base image (pinned tag, verified to exist) and how uv is installed in the image before implementing. Any new tool or dependency needs approval.
+  Done-when:
+  - `cd viamitra-backend/backend && uv run pytest -q tests/test_run_config.py` parses the Dockerfile and proves:
+    - the final `CMD` is exec form and runs `uvicorn app.main:app` with `--ws-max-size 16384` and `--ws-per-message-deflate false`;
+    - there is no `--reload` and no `APP_ENV=dev`;
+    - the last `USER` is not root or 0;
+    - `.dockerignore` excludes `.env*`.
+  - `docker build -t viamitra-api:check viamitra-backend/backend` succeeds.
+  - `docker run --rm --entrypoint id viamitra-api:check -u` prints a non-zero uid.
+  - `./scripts/verify.sh` passes with 0 skipped.
+
 ## Phase 1 — MVP
 
 - [x] **T1.1 OTP auth (backend)** — Files: `viamitra-backend/backend/app/api/auth*`, `viamitra-backend/backend/app/services/auth*`, tests · Depends: T0.4 · Done-when: tests cover send, verify, rate-limit, refresh rotation.
@@ -240,6 +261,23 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Why: T1.5 caps each user at 5 concurrent connections per API process, so N instances allow 5×N.
   Rule: a Redis-backed count with expiry so a crashed instance cannot leak slots. Propose the key scheme and limit before implementing.
   Done-when: to be defined when scoped.
+- [ ] **T1.5d API hardening: hidden SQL parameters, no query strings in logs, WS re-auth rate** (from the T1.5 security review L3/L4/L6; priority: before pilot; approved by human 2026-10-27)
+  Files: `viamitra-backend/backend/app/services/db.py`, `viamitra-backend/backend/app/services/logging*.py` (new; the log filter), `viamitra-backend/backend/app/main.py` (install the filter), `viamitra-backend/backend/app/api/ws*`, `viamitra-backend/backend/tests/test_db_errors.py` (new), `viamitra-backend/backend/tests/test_log_redaction.py` (new), `viamitra-backend/backend/tests/test_ws_live.py`, `docs/TASKS.md`, `docs/PROGRESS.md`
+  Depends: T1.5
+  Why:
+  - (a) A SQLAlchemy error message includes `[parameters: …]`, so ids leak into tracebacks and logs.
+  - (b) uvicorn logs the full path with its query string, so a token a client wrongly puts in a URL lands in the server logs even though `/ws/live` refuses it. HTTP requests are logged on `uvicorn.access`. WebSocket handshakes are logged on `uvicorn.error` (`uvicorn/protocols/websockets/websockets_sansio_impl.py:440-482`, via `get_path_with_query_string`).
+  - (c) Re-auth runs one access query each time, and nothing limits how often a client sends it.
+  Rule:
+  - (a) `create_async_engine(..., hide_parameters=True)` in `services/db.py`.
+  - (b) A `logging.Filter` that removes everything from `?` onward in the request path of records on both the `uvicorn.access` and `uvicorn.error` loggers. It is installed by the app itself, so it holds however uvicorn is started (T0.8 or locally). It never drops a record; it only rewrites the path argument. Propose how the path argument is identified in each logger's record before implementing.
+  - (c) On a socket, a re-auth within 30 s of the previous successful auth closes with 4429. The first auth and a re-auth 30 s or more later are accepted. The 30 s value is a module constant so tests can lower it.
+  Done-when:
+  - `cd viamitra-backend/backend && uv run pytest -q tests/test_db_errors.py tests/test_log_redaction.py tests/test_ws_live.py -k "hide_parameters or redact or reauth_rate"` proves:
+    - (a) a failing query's `SQLAlchemyError` text does not contain the bound value;
+    - (b) with `caplog`, a real uvicorn server leaves no query string and no `token=` value in any captured record: neither from `GET /health?token=secret-value`, nor from a refused `/ws/live?token=secret-value` handshake. The records still name the path.
+    - (c) a second auth within the window closes with 4429, and one after the (lowered) window keeps the socket open.
+  - `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.6 Parent live map + ETA** — Files: `viamitra-mobile/apps/parent/**` · Depends: T1.5
 - [ ] **T1.7 Geofence events + push** — Files: `viamitra-backend/backend/app/services/events/**`, `viamitra-backend/backend/app/workers/notify*`, tests with GPS fixtures · Depends: T1.4
 - [ ] **T1.8 Dashboard: orgs, buses, routes, stops, students CRUD** — Files: `viamitra-web/apps/dashboard/**` · Depends: T1.2
