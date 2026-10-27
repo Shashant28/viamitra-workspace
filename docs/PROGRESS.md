@@ -20,10 +20,11 @@
 - Reviews: task-verifier READY (its earlier FAIL, output printed before the leak scan, is fixed). security-reviewer: no critical, high or medium issues; low findings 1-3 fixed and confirmed.
 - Not tested: the self-test's leak branch at runtime. Forcing it needs a fake `local.env`, which the guard hook blocks even in the scratchpad. It was checked by reading the code (both reviewers).
 - Residual risk (accepted under the task rule, which constrains the host string only): an SSH port forward on `127.0.0.1:<port>`, or an `/etc/hosts` remap of `localhost`, would pass the guard. Possible tightening: require the compose ports `PG_PORT`/`PGT_PORT`, or `127.0.0.1` only.
-- Open questions for the human:
-  - An alembic auth failure prints the DB username from `local.env` (not a secret). Hide it?
-  - Tighten the port/host rule above?
-  - Minor: the self-test's password extraction for hand-written override URLs cuts at the last `@` and doesn't percent-decode. The full URL is still checked.
+- Human decisions (2026-10-27):
+  - Residual risk accepted as is: production credentials will never exist on this machine.
+  - The DB username in alembic auth-failure errors is fine; no change.
+  - Still open (minor): the self-test's password extraction for hand-written override URLs cuts at the last `@` and doesn't percent-decode. The full URL is still checked.
+  - For T1.3i's open questions: added to T1.3g as (d), persisting the unanswered-refresh first-send time in secure storage so a relaunch respects the 7 s cutoff, and (e), using `performance.now()` if it works at runtime on RN 0.88. Server-side revoke stays as is. T1.3h's Done-when gains a manual `Pixel_9` check: kill the backend mid-refresh → login after ~7 s, and a normal refresh still works. Both tasks now depend on T1.3i too.
 - Next: the first `[ ]` task whose dependencies are `[x]`.
 ## 2026-10-27 — T1.3i Driver refresh timeout below the 10 s reuse window — done, committed, not pushed. T1.3i `[x]`
 - viamitra-mobile only. Branch `task/T1.3i-refresh-timeout` from `main` at `a760626`. One commit, `d579e9e` (`fix(driver)`), fast-forwarded into `main`; branch deleted.

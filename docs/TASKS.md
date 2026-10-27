@@ -90,18 +90,20 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Done-when: on first launch after install, with no marker present, the driver app deletes both secure-store token keys before restoring a session, then writes the marker; later launches keep the session. `cd viamitra-mobile && pnpm --filter driver test` covers first launch (tokens cleared) and a later launch (tokens kept). `grep -rn "AsyncStorage" apps/driver/src apps/driver/app` finds nothing unless an approved marker store needs it, and then never for tokens. `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.3g Driver secure-storage robustness** (from the T1.4o mobile security review, lows (a)–(c) in its PROGRESS entry; priority: low, before pilot; approved by human 2026-10-27)
   Files: `viamitra-mobile/apps/driver/src/features/auth/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
-  Depends: T1.4o
-  Rule: no new dependency. (a) Every keystore write, clear and read-then-clear in `token-store.ts`/`auth.ts` (`saveTokens`, `clearTokens`, `clearIfStillStored`, logout's read+clear) runs through one module-level promise queue, so two saves never interleave; `clearIfStillStored` compares both tokens. (b) When `clearTokens` fails at logout, retry the delete once, then overwrite both keys with an empty value (which `loadTokens` treats as absent) so the next start can't restore the session; keep the existing "attempt both deletes" behaviour. (c) Logout reads `REFRESH_TOKEN_KEY` directly for the server revoke, so a failed `loadTokens` or a lone refresh key still gets `POST /auth/logout`. No token, phone or child PII in any error or log.
+  Depends: T1.4o, T1.3i
+  Rule: no new dependency. (d) and (e) were added by the human on 2026-10-27 from the T1.3i open questions; server-side revoke stays as is. (a) Every keystore write, clear and read-then-clear in `token-store.ts`/`auth.ts` (`saveTokens`, `clearTokens`, `clearIfStillStored`, logout's read+clear) runs through one module-level promise queue, so two saves never interleave; `clearIfStillStored` compares both tokens. (b) When `clearTokens` fails at logout, retry the delete once, then overwrite both keys with an empty value (which `loadTokens` treats as absent) so the next start can't restore the session; keep the existing "attempt both deletes" behaviour. (c) Logout reads `REFRESH_TOKEN_KEY` directly for the server revoke, so a failed `loadTokens` or a lone refresh key still gets `POST /auth/logout`. (d) Persist the first-send time of an unanswered refresh (T1.3i's `unanswered` marker) in `expo-secure-store`, tied to the refresh token it belongs to, so after an app relaunch the 7 s re-send cutoff still applies. The persisted time must survive a relaunch (wall-clock epoch ms; a monotonic clock restarts with the process). Write, clear and read it through the (a) queue; clear it whenever the in-memory marker is cleared, and at logout. (e) Check whether global `performance.now()` works at runtime on RN 0.88 in the driver dev build (on the device, not only from the types). If it does, use it for the in-process cutoff clock; if not, keep the current clock. Record the result in the PROGRESS entry. No token, phone or child PII in any error or log.
   Done-when: `cd viamitra-mobile && pnpm --filter driver test` proves:
   - two overlapping `saveTokens` calls end with one driver's matching pair, never a mix;
   - a stale refresh save that lands after a new login's save doesn't clear or replace the new tokens;
   - a failing delete at logout leaves `loadTokens()` returning null;
-  - logout with only the refresh key stored, or with `loadTokens` throwing, still sends `POST /auth/logout` with that token.
+  - logout with only the refresh key stored, or with `loadTokens` throwing, still sends `POST /auth/logout` with that token;
+  - after a simulated relaunch (module state reset, secure store kept), a persisted marker at or past the cutoff means the token isn't sent and the keys are cleared, while a marker inside the cutoff still allows a re-send of the same token;
+  - a marker belonging to a different refresh token is ignored, and a backend-handled response or logout removes the persisted marker.
 
   `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.3h Render tests for driver auth and screens** (from T1.3d/T1.4o verifier notes; approved by human 2026-10-27)
   Files: `viamitra-mobile/apps/driver/package.json` (devDependencies only), `viamitra-mobile/pnpm-lock.yaml`, `viamitra-mobile/apps/driver/jest.setup.*` (only if the library needs one), `viamitra-mobile/apps/driver/src/features/auth/__tests__/**`, `viamitra-mobile/apps/driver/src/features/trips/__tests__/**`, `viamitra-mobile/apps/driver/app/__tests__/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
-  Depends: T1.4o
+  Depends: T1.4o, T1.3i
   Rule: propose the exact dev-dependency versions, re-checked with `npm view` on the day, and get approval before installing; pin exactly. Candidates seen on npm 2026-10-27:
   - `@testing-library/react-native@14.1.0` (latest). Its peers are `react >=19.0.0`, `react-native >=0.78`, `jest >=29.0.0` and `test-renderer ^1.0.0`; the repo has RN 0.88.0, React 19.3.0 and Jest 30.5.2.
   - `test-renderer@1.3.1` (latest). Its peer is `react ^19.0.0`.
@@ -111,6 +113,10 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - `auth-context.tsx`: restore with no tokens → signed-out; restore with a valid refresh → signed-in; `signOut` → signed-out even when the keystore clear throws; a late `refresh()`/`signOut()` that settles after `markSignedIn` doesn't sign the new driver out.
   - the login screen (`app/login.tsx`): invalid number error, OTP step, wrong-code error, and success navigating to today's trips.
   - the today's-trip screen (`app/index.tsx`): loading, trips list, empty, error with Retry, and the redirect to login after logout with no previous trips shown.
+
+  Also a manual check on the `Pixel_9` emulator with the driver dev build (added by human 2026-10-27; record the steps and result in the PROGRESS entry):
+  - kill the backend while a refresh is in flight: the driver goes to the login screen after about 7 s (T1.3i cutoff);
+  - with the backend up, a normal refresh still works and the driver stays signed in.
 
   `pnpm audit` adds no new high/critical finding, and `./scripts/verify.sh` passes with 0 skipped.
 - [x] **T1.3i Driver refresh request timeout below the 10 s grace window** (from the T1.4p proposal; priority: before pilot; approved by human 2026-10-27)
