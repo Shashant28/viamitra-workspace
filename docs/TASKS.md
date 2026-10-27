@@ -300,6 +300,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Depends: T1.5e, T0.5's findings
   Rule:
   - Start trip / End trip buttons on the today's-trip screen call `POST /trips/{id}/start` and `POST /trips/{id}/end`.
+  - On `409 driver_has_active_trip` from start, offer "End the earlier trip": end the driver's active trip, then retry the start.
   - While a trip is active, the app publishes GPS to EMQX on `trips/{org_id}.{driver_id}.{trip_id}/location` (the topic the ingest worker parses, `app/workers/ingest.py` `TripIdentity.from_topic`) using the Transistor background-geolocation library (dev build; no license needed for debug).
   - Propose the MQTT client library, and confirm both packages and their versions exist, before installing anything.
   Done-when: to be defined when scoped.
