@@ -35,7 +35,7 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Files: `viamitra-backend/.github/workflows/**`, `viamitra-mobile/.github/workflows/**`, `viamitra-web/.github/workflows/**`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T0.3, T0.4
   Done-when: each repo has a GitHub Actions workflow that runs its own `scripts/check.sh` with `CHECK_NO_SKIPS=1` (the workspace `scripts/verify.sh` is not in any repo). The backend workflow uses Postgres (PostGIS + TimescaleDB), Redis and EMQX service containers; every secret is generated per run (none stored in the repo or as fixed values); `backend/tests/test_health.py` and the DB tests run against those services with 0 skipped. Each workflow passes on a PR.
-- [ ] **T0.7 Local migration script `scripts/db-migrate.sh`** (from T1.4p: the agent couldn't redo an edited migration because the guard hook blocks loading `infra/local.env`; approved by human 2026-10-27)
+- [x] **T0.7 Local migration script `scripts/db-migrate.sh`** (from T1.4p: the agent couldn't redo an edited migration because the guard hook blocks loading `infra/local.env`; approved by human 2026-10-27)
   Files: `viamitra-backend/scripts/db-migrate.sh` (new), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T0.3
   Rule:

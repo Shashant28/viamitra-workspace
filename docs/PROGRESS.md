@@ -1,4 +1,30 @@
 # Progress log
+## 2026-10-27 — T0.7 Local migration script `scripts/db-migrate.sh` — done, committed, not pushed. T0.7 `[x]`
+- viamitra-backend only. Branch `task/T0.7-db-migrate` from `main` at `c8f3217`. One commit, `44242e5` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
+- New `viamitra-backend/scripts/db-migrate.sh`. Usage: `bash scripts/db-migrate.sh [--self-test] <upgrade|downgrade> <rev> <dev|test|both>`.
+  - Loads `infra/local.env` itself. `APP_ENV`, `DATABASE_URL` and `TEST_ADMIN_DATABASE_URL` already set in the environment win over the file. dev uses `DATABASE_URL`; test uses `TEST_ADMIN_DATABASE_URL`. Prints `alembic current` for each target afterwards.
+  - Guard: refuses with exit 1, before alembic runs, unless `APP_ENV=dev` and every target URL passes `url_is_local`. That check parses the URL with SQLAlchemy's `make_url` (the same parser `alembic/env.py` uses) under `uv run python -I`, with the URL passed only through the environment. It requires host `127.0.0.1` or `localhost`, an empty `url.query`, and no `?` or `#` anywhere in the raw string.
+    - The `#` rule closes the bypass the first review found: with `…@localhost/db#?host=prod`, `make_url` treats `?host=` as a query, and asyncpg honors it.
+    - The raw `?` rule covers `u:p?host=x@localhost`, where `make_url` hides the query inside the password.
+    - dev-setup.sh passwords are hex, so real URLs never contain `?` or `#`.
+  - `<rev>` must be `-N` or start with a letter, digit, `_` or `+`, so it can never be read as an alembic option (`--help` and `--sql` exit 2).
+  - Hardening, after security review (all low): `set +x` straight after `set -euo pipefail`; `unset VIRTUAL_ENV BASH_ENV ALEMBIC_CONFIG PYTHONPATH PYTHONHOME`; alembic always runs with `-c alembic.ini`.
+  - `--self-test` runs the real command with `SHELLOPTS` dropped and captures its output. It checks the output for every `*_PASSWORD`/`*_SECRET`/`*_URL`/`DEV_OTP_CODE` value from the file, plus overridden URLs and their passwords, BEFORE printing anything. On a leak it prints only the count and exits 1.
+- Verified:
+  - `--self-test downgrade -1 both`, then `--self-test upgrade head both`: both DBs went `0011_refresh_reuse` → `0010_auth_logout` → `0011_refresh_reuse (head)`. Self-test PASS (20 values checked).
+  - Refusals, each exit 1 with no alembic line and only the variable name printed:
+    - `APP_ENV=prod`; a remote host; `#?host=`; a bare `#x` fragment; `?host=` hidden in the userinfo; a `?host=` query;
+    - `localhost,prod` multi-host; empty host; unparseable; empty var; a remote `TEST_ADMIN_DATABASE_URL` with target `both`.
+  - `bash -x` traces only up to `set +x`. A bogus `ALEMBIC_CONFIG` is ignored.
+  - `./scripts/verify.sh`: PASS in all three repos. Backend 119 passed, mobile 61 passed, 0 skipped.
+- Reviews: task-verifier READY (its earlier FAIL, output printed before the leak scan, is fixed). security-reviewer: no critical, high or medium issues; low findings 1-3 fixed and confirmed.
+- Not tested: the self-test's leak branch at runtime. Forcing it needs a fake `local.env`, which the guard hook blocks even in the scratchpad. It was checked by reading the code (both reviewers).
+- Residual risk (accepted under the task rule, which constrains the host string only): an SSH port forward on `127.0.0.1:<port>`, or an `/etc/hosts` remap of `localhost`, would pass the guard. Possible tightening: require the compose ports `PG_PORT`/`PGT_PORT`, or `127.0.0.1` only.
+- Open questions for the human:
+  - An alembic auth failure prints the DB username from `local.env` (not a secret). Hide it?
+  - Tighten the port/host rule above?
+  - Minor: the self-test's password extraction for hand-written override URLs cuts at the last `@` and doesn't percent-decode. The full URL is still checked.
+- Next: the first `[ ]` task whose dependencies are `[x]`.
 ## 2026-10-27 — T1.3i Driver refresh timeout below the 10 s reuse window — done, committed, not pushed. T1.3i `[x]`
 - viamitra-mobile only. Branch `task/T1.3i-refresh-timeout` from `main` at `a760626`. One commit, `d579e9e` (`fix(driver)`), fast-forwarded into `main`; branch deleted.
 - Human decisions (2026-10-27):
