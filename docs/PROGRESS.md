@@ -1,4 +1,36 @@
 # Progress log
+## 2026-10-28 — T1.5h Dev trip simulator — done, committed, not pushed. T1.5h `[x]`
+- Branch `task/T1.5h-trip-simulator` (backend only), fast-forwarded into `main` and deleted under the standing auto-merge rule. Commit: backend `0d9ff10` (`feat(backend)`). Mobile and web untouched.
+- Also this session: T1.5g now says that on `409 driver_has_active_trip` the app offers "End the earlier trip", then retries the start (workspace `6190396`).
+- Scoped this session (human asked for a realistic Delhi NCR track, not random points): Files, Rule and Done-when are now in `docs/TASKS.md`.
+- Track `backend/tests/fixtures/dwarka_school_run.json`:
+  - Dwarka Sector 14 → Sector 9, New Delhi, mostly along Road 205: 6.0 km, 10 stops (9 pickups + School), about 18 min.
+  - 221 points, one every 5 s, with a top speed of 29 km/h.
+  - Hand-made. The road geometry and free-flow segment durations come from the public OSRM demo router (data © OpenStreetMap contributors, ODbL; provenance is in the file's `source`). Durations are ×2 for traffic, with a 30 s dwell at each pickup. Stops are spaced evenly along the road and have generic names.
+  - T1.7 can reuse it as a GPS fixture.
+- `backend/scripts/simulate_trip.py`:
+  - Guard: requires `APP_ENV=dev`. The DB, Redis and MQTT hosts must be exactly localhost, 127.0.0.1 or ::1, and the DB URL must have no query string (security M1: asyncpg reads `?host=`). It refuses before connecting to anything.
+  - Identity: the demo org, driver and trip ids are the UUIDs in `TEST_MQTT_DEVICE_USERNAME`, so the device account `dev-setup.sh` already provisions can publish. No EMQX change.
+  - Seed: runtime role, with `app.org_id` set on each transaction. It upserts the org, a driver (`+919990000101`), a parent (`+919990000102`), the bus `DEMO-0001`, the route and stops, and "Demo child" (consent recorded) at stop 5. It resets the trip to scheduled for today and deletes the trip's locations and its Redis latest key.
+  - Run: `start_driver_trip` and a `trip_status` `active` publish, then QoS-1 MQTT points stamped with the current time at `--speed`× (default 1, real speed). It waits for the last point to reach Redis, then calls `end_driver_trip` and publishes `completed`. The trip is also ended on Ctrl-C, even right after the start commits. It warns if the first point never reaches Redis (ingest worker not running).
+- `backend/tests/test_simulate_trip.py` (5 tests):
+  - the guard, including `?host=` and multihost DB URLs;
+  - the fixture's shape and realism;
+  - seeding twice and resetting from an earlier day, with the trip visible to the parent through `list_parent_trips_today`;
+  - a 12-point replay through the real EMQX and an ingest worker subprocess: statuses active then completed, Redis latest equals the last point, 12 rows stored.
+- Reviews:
+  - task-verifier: READY. L1 (org filter on the delete) and L2 (Ctrl-C window) are fixed. The rest are notes: the phones would clash if the dev DB already uses them; the replay test covers 12 points, not the full track; the stop names printed are synthetic.
+  - security-reviewer: M1, L1 and L2 (the upsert resets every trip column) are fixed and re-checked, with no critical, high or medium left. Inherent limit: a localhost tunnel to a remote system can't be detected; this is noted in the docstring.
+- Verify: `CHECK_NO_SKIPS=1 ./scripts/verify.sh` passes for backend (154 passed, 0 skipped), mobile (61) and web. `check.sh` mypy covers only `app/`; `mypy --explicit-package-bases` on the two new files passes.
+- Not run: a live demo against the dev DB. The guard hook blocks sourcing `infra/local.env` from Claude's shell. The replay test covers the same path on the test DB.
+- Demo (three terminals, each from `viamitra-backend/`, with `set -a; source infra/local.env; set +a; cd backend` first):
+  1. `uv run python -m app.workers.ingest`
+  2. `uv run uvicorn app.main:app --reload` (for the apps)
+  3. `uv run python scripts/simulate_trip.py` (add `--speed 4` for a ~5 min run)
+  - The parent logs in with `+919990000102` and `DEV_OTP_CODE`; the driver app with `+919990000101`. The parent live map arrives in T1.6.
+- Next: T1.5g (propose the MQTT client library first) or T1.6.
+- Open questions: none.
+
 ## 2026-10-28 — T1.5e Driver start/end trip endpoints — done, committed, not pushed. T1.5e `[x]`
 - Branch `task/T1.5e-driver-start-end` in each repo, fast-forwarded into `main` and deleted under the standing auto-merge rule. Commits: backend `9e132c3` (`feat(backend)`), mobile `660fbbc` and web `71cd4c3` (`chore(api-client)`).
 - Decisions by the human (2026-10-27):

@@ -304,11 +304,22 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - While a trip is active, the app publishes GPS to EMQX on `trips/{org_id}.{driver_id}.{trip_id}/location` (the topic the ingest worker parses, `app/workers/ingest.py` `TripIdentity.from_topic`) using the Transistor background-geolocation library (dev build; no license needed for debug).
   - Propose the MQTT client library, and confirm both packages and their versions exist, before installing anything.
   Done-when: to be defined when scoped.
-- [ ] **T1.5h Dev trip simulator** (from T1.5e; so the parent app can be demoed without driving; approved by human 2026-10-27)
-  Files: to be scoped when picked up (expected: `viamitra-backend/backend/scripts/simulate-trip*`, a recorded GPS track fixture, tests)
+- [x] **T1.5h Dev trip simulator** (from T1.5e; so the parent app can be demoed without driving; approved by human 2026-10-27; scoped 2026-10-28)
+  Files: `viamitra-backend/backend/scripts/simulate_trip.py` (new), `viamitra-backend/backend/tests/fixtures/dwarka_school_run.json` (new), `viamitra-backend/backend/tests/test_simulate_trip.py` (new), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.5e
-  Rule: dev only; it refuses to run unless `APP_ENV=dev` and the hosts are localhost. It starts a seeded trip and replays a recorded GPS track for it through EMQX at real speed.
-  Done-when: to be defined when scoped.
+  Rule:
+  - Dev only: it refuses to run unless `APP_ENV=dev` and the database, Redis and MQTT hosts are localhost.
+  - It seeds (or resets for today) one demo trip and replays a recorded GPS track for it through EMQX at real speed (`--speed` to go faster).
+  - The track is a realistic short school route in Delhi NCR (a few km, 8-12 stops), not random points.
+  - The demo org, driver and trip ids are the ones in `TEST_MQTT_DEVICE_USERNAME` (`org.driver.trip`), so the device account that `dev-setup.sh` provisions can publish. No EMQX change.
+  - It starts and ends the trip through `services/trips.py` and publishes `trip_status`, as the API routes do; it also ends the trip on Ctrl-C.
+  Done-when:
+  - `cd viamitra-backend/backend && uv run pytest -q tests/test_simulate_trip.py` proves:
+    - the guard refuses non-dev and non-localhost settings;
+    - the fixture has 8-12 stops on a 2-10 km track inside Delhi NCR, with no gap over 10 s and no speed over 60 km/h;
+    - seeding twice leaves one scheduled trip for today that the demo parent can watch;
+    - a replay through the real EMQX and ingest worker stores every point and leaves the latest position in Redis, and `trip_status` goes active and then completed.
+  - `./scripts/verify.sh` passes with 0 skipped.
 - [ ] **T1.5c Cross-instance WebSocket connection cap per user** (from T1.5; priority: low; approved by human 2026-10-27)
   Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/services/live*.py`, `viamitra-backend/backend/app/api/ws*`, tests)
   Depends: T1.5
