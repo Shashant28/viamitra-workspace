@@ -9,6 +9,7 @@ Read those only when the current task needs them. Don't load them all by default
 1. Read the top entry of `docs/PROGRESS.md` and the ONE task you're working on in `docs/TASKS.md`.
 2. Work on exactly one task. If none is named, pick the first `[ ]` task whose dependencies are `[x]`, state its ID, then start.
 3. Before ending: run `./scripts/verify.sh`, tick the task, and add a dated handoff entry at the TOP of `docs/PROGRESS.md` (what changed, files touched, verify result, next step, open questions). Then commit the `docs/` changes in the workspace repo (`docs: <ID> ...`). Never push.
+4. Auto-merge (standing rule, set by the human 2026-10-27): when `./scripts/verify.sh` passes with 0 skipped and both `task-verifier` and `security-reviewer` report no critical/high/medium issues, commit each touched code repo (Conventional Commits), fast-forward merge its task branch into `main` and delete the branch (`git branch -d`), without asking. Still never push. Still ask before new dependencies, scope extensions, or anything in `docs/DECISIONS.md`.
 
 ## Golden rules (non-negotiable)
 - IMPORTANT: Never invent APIs, packages, config keys, env vars, CLI flags or file paths. Verify every library API from the installed package's types (`node_modules/<pkg>/**/*.d.ts`, Python source/stubs) or official docs before using it. If you can't verify, write "UNVERIFIED" and ask.

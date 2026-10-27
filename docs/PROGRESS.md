@@ -1,6 +1,7 @@
 # Progress log
-## 2026-10-27 — T1.5a `GET /parent/trips/today` — done, code not committed yet. T1.5a `[x]`
-- Branch `task/T1.5a-parent-trips-today` from `main` in viamitra-backend (`aa8d724`), viamitra-mobile and viamitra-web. The code changes are uncommitted, awaiting the human's OK on the proposed commit messages.
+## 2026-10-27 — T1.5a `GET /parent/trips/today` — done, committed, not pushed. T1.5a `[x]`
+- Branch `task/T1.5a-parent-trips-today` from `main` in each repo, fast-forwarded into `main` and deleted (approved by human). Commits: backend `15d339c` (`feat(backend)`), mobile `5138967` and web `35d6122` (`chore(api-client)`).
+- New standing rule in `CLAUDE.md`, Session protocol step 4: commit and fast-forward without asking when verify passes with 0 skipped and both reviewers report no critical/high/medium issues.
 - Response fields chosen by the human: `service_date`; per trip `id`, `status` (`scheduled`/`active`), `started_at`, `route_id`, `route_name`, `shift`, `bus_reg_no`, `student_ids` (the caller's own consented children on that route; ids only, no names). Sorted morning shift first, then route name, then trip id.
 - One shared rule: `services/trips.py:watchable_trip_filter`, used by both `live.watchable_trips` (WS subscribe) and the new `list_parent_trips_today`.
   - `_own_children_on_trip_route` is the parent's EXISTS check and also builds `student_ids`, so a child can never appear in `student_ids` unless they are what makes the trip visible.
