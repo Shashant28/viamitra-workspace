@@ -269,10 +269,44 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   - a full watcher queue drops positions before a status change;
   - a trip that ends between the access check and the hub subscription gives `not_available` and leaves no subscription (security review L1).
   `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.5e Driver start/end trip endpoints** (from T1.5b: nothing changes a trip's status yet; PRD driver "start/end trip"; approved by human 2026-10-27 as T1.5b's follow-up)
-  Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/api/trips*`, `viamitra-backend/backend/app/services/trips*`, `viamitra-backend/backend/app/schemas/trips*`, a DB grant migration if the runtime role lacks UPDATE on `trips`, tests, `openapi.json`, both generated clients)
+- [x] **T1.5e Driver start/end trip endpoints** (from T1.5b: nothing changes a trip's status yet; PRD driver "start/end trip"; approved by human 2026-10-27 as T1.5b's follow-up; scoped by human 2026-10-27)
+  Files: `viamitra-backend/backend/app/api/trips.py`, `viamitra-backend/backend/app/services/trips.py`, `viamitra-backend/backend/app/services/live.py` (public `LiveHub.publish_trip_status`), `viamitra-backend/backend/app/models/entities.py` (the index), `viamitra-backend/backend/alembic/versions/0012_one_active_trip_per_driver.py` (new), `viamitra-backend/backend/tests/test_trip_lifecycle.py` (new), `viamitra-backend/backend/tests/test_ingest_db.py`, `viamitra-backend/backend/tests/test_ws_live.py` (seed only: one active trip per driver; approved by human 2026-10-28), `viamitra-backend/openapi.json`, both `packages/api-client/src/schema.d.ts` (regenerated), `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.5b
-  Rule: a driver can start their own trip for today (`scheduled` → `active`, sets `started_at`) and end it (`active` → `completed`, sets `ended_at`). After the commit it calls `publish_trip_status`. Propose the routes, the allowed transitions and the error codes before implementing.
+  Rule:
+  - `POST /trips/{trip_id}/start` and `POST /trips/{trip_id}/end`, driver role only, each returning `200` with `DriverTrip`. Only the trip's own driver (from the token) may call them.
+  - start: `scheduled` → `active` for today's service date (ADR-013), sets `started_at`. end: `active` → `completed` on any service date, sets `ended_at`. Each is one conditional `UPDATE … RETURNING`. `publish_trip_status` runs only after the commit; a failed publish is logged (error type only) and does not fail the request.
+  - A repeated start of an `active` trip, or a repeated end of a `completed` trip, returns `200` unchanged and publishes nothing.
+  - Errors (`detail`):
+    - `404 trip_not_found`: unknown id, another driver's trip or another org's trip, all alike.
+    - `409 trip_not_today`: start of a scheduled trip for another service date.
+    - `409 trip_not_startable`: start of a completed or cancelled trip.
+    - `409 trip_not_active`: end of a scheduled or cancelled trip.
+    - `409 driver_has_active_trip`: start while another of the driver's trips is active. Enforced by a partial unique index on `trips (org_id, driver_id) WHERE status = 'active'`.
+  - No cancel (T1.5f) and no `trip_events` rows in this task. Ingest is unchanged: it already drops points for any trip that is not active.
+  Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_trip_lifecycle.py tests/test_ingest_db.py` against real Postgres and Redis proves:
+  - every transition and error code above, plus 401 without a token and 403 for parent, org_admin and super_admin;
+  - a WS watcher gets `trip_status: active` after a start, and `trip_status: completed` then `unsubscribed`/`trip_ended` after an end;
+  - (a) two concurrent starts of the same trip both return 200 and exactly one status is published;
+  - (b) concurrent starts of two different trips by the same driver give exactly one 200 and one `409 driver_has_active_trip`;
+  - the ingest authorizer refuses a point for a trip once it has ended.
+  `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.5f org_admin cancels scheduled/active trips** (from T1.5e; after T1.8 dashboard CRUD; approved by human 2026-10-27)
+  Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/api/*`, `viamitra-backend/backend/app/services/trips*`, tests, `openapi.json`, both generated clients, dashboard UI)
+  Depends: T1.5e, T1.8
+  Rule: an org_admin can cancel a `scheduled` or `active` trip of their own org. After the commit it calls `publish_trip_status` with `cancelled`. Propose the route and error codes before implementing.
+  Done-when: to be defined when scoped.
+- [ ] **T1.5g Driver app: Start/End trip buttons and background GPS to EMQX** (from T1.5e; approved by human 2026-10-27)
+  Files: to be scoped when picked up (expected: the driver app in `viamitra-mobile/apps/driver/`)
+  Depends: T1.5e, T0.5's findings
+  Rule:
+  - Start trip / End trip buttons on the today's-trip screen call `POST /trips/{id}/start` and `POST /trips/{id}/end`.
+  - While a trip is active, the app publishes GPS to EMQX on `trips/{org_id}.{driver_id}.{trip_id}/location` (the topic the ingest worker parses, `app/workers/ingest.py` `TripIdentity.from_topic`) using the Transistor background-geolocation library (dev build; no license needed for debug).
+  - Propose the MQTT client library, and confirm both packages and their versions exist, before installing anything.
+  Done-when: to be defined when scoped.
+- [ ] **T1.5h Dev trip simulator** (from T1.5e; so the parent app can be demoed without driving; approved by human 2026-10-27)
+  Files: to be scoped when picked up (expected: `viamitra-backend/backend/scripts/simulate-trip*`, a recorded GPS track fixture, tests)
+  Depends: T1.5e
+  Rule: dev only; it refuses to run unless `APP_ENV=dev` and the hosts are localhost. It starts a seeded trip and replays a recorded GPS track for it through EMQX at real speed.
   Done-when: to be defined when scoped.
 - [ ] **T1.5c Cross-instance WebSocket connection cap per user** (from T1.5; priority: low; approved by human 2026-10-27)
   Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/services/live*.py`, `viamitra-backend/backend/app/api/ws*`, tests)

@@ -1,4 +1,48 @@
 # Progress log
+## 2026-10-28 — T1.5e Driver start/end trip endpoints — done, committed, not pushed. T1.5e `[x]`
+- Branch `task/T1.5e-driver-start-end` in each repo, fast-forwarded into `main` and deleted under the standing auto-merge rule. Commits: backend `9e132c3` (`feat(backend)`), mobile `660fbbc` and web `71cd4c3` (`chore(api-client)`).
+- Decisions by the human (2026-10-27):
+  - Partial unique index for one active trip per driver.
+  - A repeated start or end returns 200 unchanged and publishes nothing.
+  - No cancel (new **T1.5f**, org_admin, after T1.8). No `trip_events` rows yet.
+  - Approved 2026-10-28: a seed-only change to `test_ws_live.py`, whose driver had three active trips.
+  - New tasks added: **T1.5g** (driver app Start/End buttons + background GPS to EMQX via Transistor; propose the MQTT library first) and **T1.5h** (dev trip simulator).
+- Contract:
+  - `POST /trips/{trip_id}/start` and `POST /trips/{trip_id}/end`, driver role only, return `200` with `DriverTrip`.
+  - start: `scheduled` → `active`, today's service date only. end: `active` → `completed`, on any service date.
+  - Errors (`detail`): `404 trip_not_found` (another driver's or org's trip, or an unknown id, all alike); `409 trip_not_today`; `409 trip_not_startable`; `409 trip_not_active`; `409 driver_has_active_trip`.
+- Changes (backend):
+  - `services/trips.py`:
+    - `start_driver_trip` / `end_driver_trip`: one conditional `UPDATE … RETURNING`, then a read-back that picks the error and returns the trip. One commit.
+    - A 23505 from the UPDATE becomes `driver_has_active_trip`; any other IntegrityError is re-raised.
+    - `_driver_trips()` holds the select that `GET /trips/today` now shares.
+  - `api/trips.py`: the two routes. They publish only when this call made the change. The publish runs under `asyncio.shield` (security review L1); a Redis failure logs only the error type.
+  - `services/live.py`: `LiveHub.publish_trip_status`, so the hub's Redis client stays private.
+  - `models/entities.py` + migration `0012_one_active_trip_per_driver`: index `ux_trips_one_active_per_driver` on `(org_id, driver_id) WHERE status = 'active'`. Downgrade/upgrade round-trip checked on the test DB.
+  - Ingest is unchanged: its authorizer already reads the trip's status for every message.
+- Files:
+  - Backend: `app/api/trips.py`, `app/services/trips.py`, `app/services/live.py`, `app/models/entities.py`, `alembic/versions/0012_one_active_trip_per_driver.py` (new), `tests/test_trip_lifecycle.py` (new), `tests/test_ingest_db.py`, `tests/test_ws_live.py` (seed only), `openapi.json`.
+  - Mobile and web: `packages/api-client/src/schema.d.ts`.
+  - Workspace: `docs/TASKS.md`, `docs/PROGRESS.md`.
+- Tests (real Postgres + Redis, through a real uvicorn server):
+  - `test_start_and_end_lifecycle`: every transition and 409, both idempotent repeats with no publish, WS `trip_status` active then completed + `unsubscribed`/`trip_ended`, ending a stale trip from another day.
+  - `test_only_the_trips_own_driver_may_start_or_end`: the 404 cases, a crossed org claim, 403 for parent, org_admin and super_admin, 401 without a token. Nothing changes and nothing is published.
+  - Concurrency, 5 rounds each:
+    - (a) two starts of the same trip both return 200 and publish exactly once;
+    - (b) starts of two of one driver's trips give exactly one 200 and one `409 driver_has_active_trip`.
+  - `test_failed_publish_keeps_the_change` (verifier L1).
+  - `test_ingest_db.py::test_ingest_refuses_points_once_the_driver_ends_the_trip`.
+- Reviews:
+  - task-verifier: READY, no critical, high or medium. L1 (no test for a failed publish) is fixed. L2/L3 are notes: `gather` doesn't force the overlap, and the ingest test calls the service directly.
+  - security-reviewer: no critical, high or medium. L1 (a client disconnect cancelling the publish) is fixed with `asyncio.shield`.
+  - Open lows:
+    - L2: an active trip that is never ended keeps accepting location and blocks today's start. Tracked in T1.4m, which stays before pilot. T1.5g should offer "end the stale trip" on `409 driver_has_active_trip`.
+    - L3: the role is trusted from the JWT for ≤15 min; this is the existing pattern on every route.
+  - Info: migration 0012 fails if a driver already has two active trips; check production data before running it.
+- Verify: `CHECK_NO_SKIPS=1 ./scripts/verify.sh` passes for backend (149 passed, 0 skipped), mobile (61) and web.
+- Next: T1.5g (propose the MQTT client library first), T1.5h or T1.6.
+- Open questions: none.
+
 ## 2026-10-27 — T1.5b Trip status frames on the WebSocket — done, committed, not pushed. T1.5b `[x]`
 - Branch `task/T1.5b-trip-status-frames` from backend `main`, fast-forwarded into `main` and deleted under the standing auto-merge rule. Commit: backend `cd4f566` (`feat(backend)`). Mobile and web untouched (WS frames are not in OpenAPI).
 - Decisions by the human (scoped this session):
