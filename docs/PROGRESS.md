@@ -1,4 +1,30 @@
 # Progress log
+## 2026-10-27 — T1.5a `GET /parent/trips/today` — done, code not committed yet. T1.5a `[x]`
+- Branch `task/T1.5a-parent-trips-today` from `main` in viamitra-backend (`aa8d724`), viamitra-mobile and viamitra-web. The code changes are uncommitted, awaiting the human's OK on the proposed commit messages.
+- Response fields chosen by the human: `service_date`; per trip `id`, `status` (`scheduled`/`active`), `started_at`, `route_id`, `route_name`, `shift`, `bus_reg_no`, `student_ids` (the caller's own consented children on that route; ids only, no names). Sorted morning shift first, then route name, then trip id.
+- One shared rule: `services/trips.py:watchable_trip_filter`, used by both `live.watchable_trips` (WS subscribe) and the new `list_parent_trips_today`.
+  - `_own_children_on_trip_route` is the parent's EXISTS check and also builds `student_ids`, so a child can never appear in `student_ids` unless they are what makes the trip visible.
+  - It uses an explicit `.correlate(Trip)` (security review L1).
+  - `WATCHABLE_STATUSES` moved from `live.py` to `trips.py`. WS semantics are unchanged; the WS tests pass.
+  - The rule lives in `trips.py` because `live.py` already imports `service_date_at` from there; the reverse import would be circular.
+- Files:
+  - Backend new: `backend/app/api/parent.py`, `backend/tests/test_parent_trips.py`.
+  - Backend changed: `backend/app/services/trips.py`, `backend/app/services/live.py`, `backend/app/schemas/trips.py` (`ParentTrip`, `ParentTripsTodayResponse`), `backend/app/main.py`, `openapi.json`.
+  - Mobile and web: `packages/api-client/src/schema.d.ts` (regenerated).
+- Tests (`test_parent_trips.py`, real Postgres):
+  - For 4 parents, the endpoint lists exactly the set `watchable_trips` allows.
+  - Excluded: completed, cancelled, yesterday's and tomorrow's trips, another route, another org, consent dated in the future, a child with no stop.
+  - Spoofed query parameters are ignored, and a token with a mismatched org sees nothing.
+  - driver, org_admin and super_admin get 403; a missing token gets 401.
+- Reviews:
+  - task-verifier: READY.
+  - security-reviewer: no critical, high or medium findings. L1 (implicit correlation) is fixed.
+  - Info, pre-existing: `require_role` trusts the token until it expires (≤15 min). The student rows are read live, so a child who is unlinked disappears at once.
+- Verify: `CHECK_NO_SKIPS=1 ./scripts/verify.sh` passes for backend (139 passed, 0 skipped), mobile (61) and web.
+- Note: a guard hook blocks sourcing `infra/local.env` in a command. Run DB tests through `bash scripts/check.sh`, not a hand-written pytest command.
+- Next: T1.5b (trip status frames), then T1.6.
+- Open questions: none new. T1.5's (a)–(d) are tracked in T1.5d and T0.8.
+
 ## 2026-10-27 — T1.5 WebSocket live position — done, committed, not pushed. T1.5 `[x]`
 - viamitra-backend only. Branch `task/T1.5-ws-live-position` from `main` at `44242e5`. One commit, `aa8d724` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
 - Plan, scope extensions, `websockets==17.3` and the Done-when were approved by the human before any code was written. Their changes:
