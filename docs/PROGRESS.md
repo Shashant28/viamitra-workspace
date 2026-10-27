@@ -1,4 +1,46 @@
 # Progress log
+## 2026-10-27 — T1.5 WebSocket live position — done, committed, not pushed. T1.5 `[x]`
+- viamitra-backend only. Branch `task/T1.5-ws-live-position` from `main` at `44242e5`. One commit, `aa8d724` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
+- Plan, scope extensions, `websockets==17.3` and the Done-when were approved by the human before any code was written. Their changes:
+  - consent check required for parents;
+  - 4408 on auth timeout;
+  - 5 connections per user per process;
+  - new tasks T1.5a, T1.5b and T1.5c.
+- `students.consent_at` is already NOT NULL, from migration 0001. The human chose to enforce consent with a query filter (`consent_at IS NOT NULL AND consent_at <= now`), plus a test that the DB rejects a student without it.
+- Files:
+  - New: `backend/app/api/ws.py`, `backend/app/services/live.py`, `backend/tests/test_ws_live.py`.
+  - Changed: `backend/app/api/auth.py` (`AccessClaims.expires_at`, `compare=False`), `backend/app/main.py`, `backend/tests/test_route_auth.py`, `backend/pyproject.toml`, `backend/uv.lock`.
+- `GET /ws/live`; any query string is refused at the handshake.
+  - The first message must be `{"type":"auth","token":…}` within 5 s, else close 4408.
+  - The token is checked with `verify_access_token`. Bad or expired → 4401; driver and super_admin → 4403.
+  - Client frames: `auth` (also used to re-auth), `subscribe`, `unsubscribe`. Unknown fields are rejected, and frames are capped at 4096 characters (4400).
+  - Server frames: `ready` (with `expires_at`), `subscribed`, `location`, `unsubscribed` (reason `client` or `access_revoked`), `error` (`not_available` or `too_many_subscriptions`).
+- Access is checked by `services/live.py:watchable_trips`: one query on a tenant (RLS) session, `org_id` and role from the token.
+  - A trip must be today's (ADR-013), `scheduled` or `active`, and in the caller's org.
+  - A parent also needs their own child, consent recorded and not in the future, with a stop on the trip's route. org_admin: any trip in the org.
+  - Every denial gets the same `not_available` frame. Only `active` trips get the Redis snapshot.
+- Expiry: a re-auth must keep the same user, org and role (else 4403), and re-checks all subscriptions in one query. Past `exp` nothing more is handled, and the socket closes with 4401.
+- Fan-out (`LiveHub`): one Redis pub/sub connection per process, refcounted per `trip:{id}:location` channel. A message is routed only if its payload `trip_id` matches its channel.
+  - Each socket has a 32-item queue that drops the oldest, and a per-trip `at` check that drops older points.
+  - On Redis loss, every socket closes with 1011 and the hub starts over. On a DB error: 1011 plus the fixed log line `live_database_error`.
+- Limits:
+  - 20 messages per 10 s → 4429.
+  - 10 subscriptions per socket.
+  - 5 connections per user per process → 4429.
+  - 200 unauthenticated sockets per process; the next is refused at the handshake.
+- `test_route_auth.py`: WebSocket routes count as the pseudo-method `WEBSOCKET`. `/ws/live` is pinned to `app.api.ws.live_positions` in a separate first-message-auth allowlist.
+- Reviews:
+  - task-verifier: READY. Its notes are done (tests for the frame limit, subscription cap, drop-oldest queue and Redis loss; `Task[Message]` typing).
+  - security-reviewer: no critical or high findings. Fixed: M1, by capping pre-auth sockets; L2, strict expiry; L3, a single re-check query; L4, `SQLAlchemyError` → 1011 with a fixed log line; L5, channel/payload match. Open items are under Open questions.
+- Verify: `CHECK_NO_SKIPS=1 bash scripts/check.sh` in the backend gives 135 passed, 0 skipped. `./scripts/verify.sh` passes for backend, mobile and web.
+- Next: T1.5a (`GET /parent/trips/today`) and T1.5b (trip status frames), both before T1.6.
+- Open questions, none of them in T1.5's files:
+  - (a) Security M1 remainder: the uvicorn launch flags `--ws-max-size 16384` and `--ws-per-message-deflate false`. There is no production start command yet, so they belong wherever the server is launched (deploy task).
+  - (b) L4 remainder: `hide_parameters=True` on `create_async_engine` (`services/db.py`).
+  - (c) L6: uvicorn logs the query string of refused `/ws/live?…` handshakes. Needs a log filter or proxy stripping, and client tests that never build a query string.
+  - (d) L3 remainder: should re-auth be throttled (for example at most once per 60 s)?
+  - Should (a)–(d) become tasks?
+
 ## 2026-10-27 — T0.7 Local migration script `scripts/db-migrate.sh` — done, committed, not pushed. T0.7 `[x]`
 - viamitra-backend only. Branch `task/T0.7-db-migrate` from `main` at `c8f3217`. One commit, `44242e5` (`feat(backend)`), fast-forwarded into `main`; branch deleted.
 - New `viamitra-backend/scripts/db-migrate.sh`. Usage: `bash scripts/db-migrate.sh [--self-test] <upgrade|downgrade> <rev> <dev|test|both>`.
