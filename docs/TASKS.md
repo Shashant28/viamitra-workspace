@@ -251,10 +251,28 @@ Paths are relative to the workspace root. Since 2026-10-26 code lives in three g
   Depends: T1.5
   Rule: `require_role("parent")`, org-scoped through the tenant session. Lists today's (ADR-013) trips on the routes of the caller's own children whose consent is recorded, using the same rule as the WebSocket subscribe check (one shared query, not a copy). No child PII beyond what the parent already owns; propose the response fields before implementing. Trip ids are not added to the WS `ready` frame.
   Done-when: `uv run pytest -q tests/test_parent_trips.py` proves a parent sees exactly the trips the WS would let them subscribe to (own child's route, today, consent recorded), nothing from another route, org or day, and that other roles get 403. `openapi.json` and both clients are current. `./scripts/verify.sh` passes with 0 skipped.
-- [ ] **T1.5b Trip status frames on the WebSocket** (from T1.5: subscribers only learn a trip ended at their next re-auth; before T1.6; approved by human 2026-10-27)
-  Files: to be scoped when picked up (expected: the code that starts/ends trips, `viamitra-backend/backend/app/services/live*.py`, `viamitra-backend/backend/app/api/ws*`, tests)
+- [x] **T1.5b Trip status frames on the WebSocket** (from T1.5: subscribers only learn a trip ended at their next re-auth; before T1.6; approved by human 2026-10-27)
+  Status 2026-10-27: done. Backend `cd4f566` on `main`. WebSocket frames are not in OpenAPI; no client regen.
+  Files (scoped 2026-10-27, approved by human): `viamitra-backend/backend/app/services/live.py`, `viamitra-backend/backend/app/api/ws.py`, `viamitra-backend/backend/tests/test_ws_live.py`, `docs/TASKS.md`, `docs/PROGRESS.md`
   Depends: T1.5
-  Rule: when a trip starts or ends, publish its status on `trip:{id}:status`; the WS hub forwards it to that trip's watchers as a `trip_status` frame and, on end, drops the subscription. Propose the payload and who publishes before implementing.
+  Rule: when a trip starts or ends, publish its status on `trip:{id}:status`; the WS hub forwards it to that trip's watchers as a `trip_status` frame and, on end, drops the subscription.
+  Decided by human 2026-10-27:
+  - Nothing starts or ends trips yet, so this task ships only the publisher helper `services/live.py:publish_trip_status`. It is called after the DB commit by whatever changes a trip's status (T1.5e and T1.4m's auto-close).
+  - The Redis message is `{"trip_id", "status": "active"|"completed"|"cancelled", "at"}`. It is routed by its channel, as locations are.
+  - The WS sends `{"type":"trip_status","trip_id","status","at"}`. On `completed`/`cancelled` the server then sends `{"type":"unsubscribed","trip_id","reason":"trip_ended"}` and drops the subscription.
+  - A lost publish is still caught at the next re-auth, which already drops trips that are no longer watchable.
+  Done-when: `cd viamitra-backend/backend && uv run pytest -q tests/test_ws_live.py` against real Postgres and Redis proves:
+  - a `publish_trip_status` of `active` reaches a watcher of a scheduled trip as `trip_status`, and the subscription stays;
+  - `completed` and `cancelled` each send `trip_status` then `unsubscribed`/`trip_ended`, after which nothing more arrives for that trip and the instance holds no Redis subscription to either of the trip's channels;
+  - a status naming another trip, or a malformed one, reaches nobody;
+  - both app instances deliver one status publish;
+  - a full watcher queue drops positions before a status change;
+  - a trip that ends between the access check and the hub subscription gives `not_available` and leaves no subscription (security review L1).
+  `./scripts/verify.sh` passes with 0 skipped.
+- [ ] **T1.5e Driver start/end trip endpoints** (from T1.5b: nothing changes a trip's status yet; PRD driver "start/end trip"; approved by human 2026-10-27 as T1.5b's follow-up)
+  Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/api/trips*`, `viamitra-backend/backend/app/services/trips*`, `viamitra-backend/backend/app/schemas/trips*`, a DB grant migration if the runtime role lacks UPDATE on `trips`, tests, `openapi.json`, both generated clients)
+  Depends: T1.5b
+  Rule: a driver can start their own trip for today (`scheduled` → `active`, sets `started_at`) and end it (`active` → `completed`, sets `ended_at`). After the commit it calls `publish_trip_status`. Propose the routes, the allowed transitions and the error codes before implementing.
   Done-when: to be defined when scoped.
 - [ ] **T1.5c Cross-instance WebSocket connection cap per user** (from T1.5; priority: low; approved by human 2026-10-27)
   Files: to be scoped when picked up (expected: `viamitra-backend/backend/app/services/live*.py`, `viamitra-backend/backend/app/api/ws*`, tests)

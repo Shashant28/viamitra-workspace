@@ -1,4 +1,36 @@
 # Progress log
+## 2026-10-27 — T1.5b Trip status frames on the WebSocket — done, committed, not pushed. T1.5b `[x]`
+- Branch `task/T1.5b-trip-status-frames` from backend `main`, fast-forwarded into `main` and deleted under the standing auto-merge rule. Commit: backend `cd4f566` (`feat(backend)`). Mobile and web untouched (WS frames are not in OpenAPI).
+- Decisions by the human (scoped this session):
+  - Nothing starts or ends trips yet, so this task ships only the publisher helper. New follow-up **T1.5e** (driver start/end endpoints) will call it, and so will T1.4m's auto-close.
+  - On end, the client gets `trip_status`, then `unsubscribed` with `reason: "trip_ended"`.
+- Contract:
+  - Redis `trip:{id}:status`: `{"trip_id","status":"active"|"completed"|"cancelled","at"}` (`extra="forbid"`).
+  - WS frame: `{"type":"trip_status","trip_id","status","at"}`.
+- Changes:
+  - `services/live.py`:
+    - `status_channel`, `TripStatus` and `publish_trip_status`. It requires an aware `at`; call it only after the DB commit.
+    - `parse_message` routes by channel (suffix picks the parser; the channel must equal the one built from the payload's trip id).
+    - The hub subscribes and unsubscribes both channels per trip.
+    - `Watcher` is now a deque + Event that drops the oldest *position* first, so a status change or `HUB_LOST` survives a full inbox.
+  - `api/ws.py`:
+    - `_deliver` forwards `trip_status` and drops the trip on `completed`/`cancelled`.
+    - `_subscribe` re-checks access after the hub subscription (security review L1), so a trip that ends mid-subscribe gets `not_available` and leaves no subscription. This costs one extra access query per successful subscribe.
+- Files: backend `backend/app/services/live.py`, `backend/app/api/ws.py`, `backend/tests/test_ws_live.py`; workspace `docs/TASKS.md` (T1.5b scoped, T1.5e added), `docs/PROGRESS.md`.
+- Tests (`test_ws_live.py`, real Postgres + Redis):
+  - `test_trip_status_frames`: start keeps the subscription; completed and cancelled each give both frames and leave 0 subscribers on both channels; nothing arrives afterwards.
+  - `test_trip_ending_during_subscribe_is_not_kept` covers the mid-subscribe race.
+  - The routing test is extended: wrong trip, crossed channels, malformed and extra-field statuses reach nobody.
+  - The two-instance test is extended: a status publish reaches both instances.
+  - `test_watcher_drops_positions_before_status_changes`, and `test_publish_trip_status_needs_an_aware_time`.
+- Reviews:
+  - task-verifier: READY. Its Low (no "nothing after cancelled" assertion) is fixed.
+  - security-reviewer: no critical, high or medium. L1 (subscribe race) is fixed.
+  - Info, open: a subscriber to a scheduled trip gets `trip_status: active` but no position snapshot at that moment; the first live point follows.
+- Verify: `CHECK_NO_SKIPS=1 ./scripts/verify.sh` passes for backend (143 passed, 0 skipped), mobile (61) and web.
+- Next: T1.5e (driver start/end endpoints, propose routes/transitions first) or T1.6.
+- Open questions: none.
+
 ## 2026-10-27 — T1.5a `GET /parent/trips/today` — done, committed, not pushed. T1.5a `[x]`
 - Branch `task/T1.5a-parent-trips-today` from `main` in each repo, fast-forwarded into `main` and deleted (approved by human). Commits: backend `15d339c` (`feat(backend)`), mobile `5138967` and web `35d6122` (`chore(api-client)`).
 - New standing rule in `CLAUDE.md`, Session protocol step 4: commit and fast-forward without asking when verify passes with 0 skipped and both reviewers report no critical/high/medium issues.
